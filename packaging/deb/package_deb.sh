@@ -179,16 +179,15 @@ fi
 
 safe_remove_tree "${STAGE_DIR}" "Debian staging"
 INSTALL_EXEC_PATH="${INSTALL_ROOT}/bin/${BIN_NAME}"
-INSTALL_ICON_PATH="${INSTALL_ROOT}/share/images/cap-lora-1262.png"
+INSTALL_ICON_PATH="${LAUNCHER_ROOT}/share/images/cap-lora-1262.png"
 mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/etc/sudoers.d" \
     "${STAGE_DIR}${INSTALL_ROOT}/bin" \
-    "${STAGE_DIR}${INSTALL_ROOT}/share/images" \
     "${STAGE_DIR}${LAUNCHER_ROOT}/applications" \
+    "${STAGE_DIR}${LAUNCHER_ROOT}/share/images" \
     "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}" "${DIST_DIR}"
 install -m 755 "${EXECUTABLE}" "${DIST_DIR}/${BIN_NAME}"
 install -m 755 "${EXECUTABLE}" "${STAGE_DIR}${INSTALL_EXEC_PATH}"
 sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" \
-    -e "s|@CAP_LORA_ICON_PATH@|${INSTALL_ICON_PATH}|g" \
     "${DESKTOP_TEMPLATE}" >"${STAGE_DIR}${LAUNCHER_ROOT}/applications/cap-lora-1262.desktop"
 sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" "${SUDOERS_FILE}" \
     >"${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
@@ -199,15 +198,17 @@ if command -v visudo >/dev/null 2>&1; then
     visudo -c -f "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
 fi
 
-# Older package revisions placed these two files directly in APPLaunch. Dpkg
-# does not remove ordinary files that disappear from a later package, so clean
-# only those exact legacy paths during an upgrade.
+# Older package revisions placed the executable directly in APPLaunch and the
+# icon below the standalone resource root. Dpkg does not remove ordinary files
+# that disappear from a later package, so clean only those exact legacy paths.
+# The APPLaunch shared icon path remains current because the launcher resolves
+# relative Icon names from that directory.
 cat >"${STAGE_DIR}/DEBIAN/postinst" <<EOF
 #!/bin/sh
 set -eu
 if [ "\${1:-}" = configure ]; then
     rm -f /usr/share/APPLaunch/bin/${BIN_NAME}
-    rm -f /usr/share/APPLaunch/share/images/cap-lora-1262.png
+    rm -f /usr/share/Cap-LoRa-1262/share/images/cap-lora-1262.png
 fi
 exit 0
 EOF

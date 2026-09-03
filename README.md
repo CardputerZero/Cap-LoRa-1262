@@ -92,12 +92,12 @@ Radio initialization errors and SPI/GPIO diagnostics are shown in the app.
 
 ## Package
 
-The executable and package-owned artwork are installed below
-`/usr/share/Cap-LoRa-1262/`. The package also installs a desktop entry under
-`/usr/share/APPLaunch/applications/`, which is the directory scanned by the
-CardputerZero launcher for dynamic applications. Keeping only this desktop
-entry in APPLaunch preserves launcher integration without making the LoRa
-source or executable part of the APPLaunch project.
+The executable is installed below `/usr/share/Cap-LoRa-1262/`. The package
+installs its icon in APPLaunch's shared image directory and its desktop entry
+under `/usr/share/APPLaunch/applications/`; these are the paths used by the
+CardputerZero launcher for dynamic applications. Keeping only these launcher
+integration files in APPLaunch preserves separation from the LoRa source and
+executable.
 
 When removing the legacy built-in LoRa page from APPLaunch, keep the
 launcher's `lora` display-order token. The desktop entry uses `Name=LoRa`, and

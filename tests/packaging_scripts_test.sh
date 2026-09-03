@@ -26,6 +26,8 @@ expect_rejected env ROOT_DIR="${ROOT_DIR}/missing" BSP_VERSION='v9.9.9' BSP_SHA2
 
 grep -Fq 'Exec=/usr/bin/sudo -n -- @CAP_LORA_EXEC_PATH@' \
     "${ROOT_DIR}/packaging/deb/cap-lora-1262.desktop.in"
+grep -Fq 'Icon=cap-lora-1262.png' \
+    "${ROOT_DIR}/packaging/deb/cap-lora-1262.desktop.in"
 grep -Fq '%gpio ALL=(root) NOPASSWD: @CAP_LORA_EXEC_PATH@ ""' \
     "${ROOT_DIR}/packaging/deb/m5cardputerzero-cap-lora-1262.sudoers"
 
