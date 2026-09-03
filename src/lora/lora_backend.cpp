@@ -15,6 +15,7 @@
 #include <cstring>
 #include <ctime>
 #include <poll.h>
+#include <mutex>
 #include <unistd.h>
 
 #ifndef SLOGI
@@ -142,6 +143,10 @@ private:
 
 static LoraRuntimeState g_lora;
 static std::atomic<bool> g_stop_requested{false};
+// The initialization worker and LVGL timer share the RadioLib instance and
+// state.  Serialize public operations so shutdown cannot delete the radio
+// while a poll/send/get_info call is using it.
+static std::mutex g_lora_mutex;
 
 static bool lora_stop_requested()
 {
@@ -496,11 +501,19 @@ static void lora_capture_device_errors(const char *stage, uint16_t irq_status)
 
 static bool lora_send_text_packet(const char *payload)
 {
+    if (lora_stop_requested()) return false;
     if (!g_lora.initialized || g_lora.radio == NULL) {
         SLOGI("LoRa TX: not initialized");
         return false;
     }
-    if (payload == NULL || payload[0] == '\0') return false;
+    if (payload == NULL) return false;
+    const size_t payload_length = strlen(payload);
+    if (payload_length == 0) return false;
+    if (payload_length > MAX_TEXT_PAYLOAD) {
+        snprintf(g_lora.last_diag, sizeof(g_lora.last_diag),
+                 "payload too long (%zu bytes; max %zu)", payload_length, MAX_TEXT_PAYLOAD);
+        return false;
+    }
     if (g_lora.tx_in_progress) return false;
     snprintf(g_lora.last_tx, sizeof(g_lora.last_tx), "%s", payload);
     g_lora.has_sent_message    = true;
@@ -510,7 +523,6 @@ static bool lora_send_text_packet(const char *payload)
     g_lora.tx_mode             = false;
     g_lora.selected_tx_mode    = false;
     (void)g_lora.radio->standby();
-    const size_t payload_length = strlen(g_lora.last_tx);
     g_lora.tx_timeout_ms        = lora_tx_timeout_for_payload(payload_length);
     int16_t state               = g_lora.radio->startTransmit((uint8_t *)g_lora.last_tx, payload_length);
     if (state != RADIOLIB_ERR_NONE) {
@@ -713,6 +725,7 @@ static void lora_check_tx_fallback(void)
 
 static void lora_poll_hardware(void)
 {
+    if (lora_stop_requested()) return;
     if (!g_lora.initialized) return;
     lora_service_irq_once();
     lora_check_tx_fallback();
@@ -905,6 +918,7 @@ static void copy_cstr(char* destination, size_t capacity, const char* source)
 void get_info(cap_lora::LoraInfo *info, bool drain_events)
 {
     if (!info) return;
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
     *info = cap_lora::LoraInfo{};
     info->initialized      = g_lora.initialized ? 1 : 0;
     info->hw_ready         = g_lora.hw_ready ? 1 : 0;
@@ -930,6 +944,8 @@ void get_info(cap_lora::LoraInfo *info, bool drain_events)
 
 bool initialize()
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
+    if (lora_stop_requested()) return false;
     if (!g_lora.initialized && !g_lora.hw_ready) lora_init_hardware();
     return g_lora.hw_ready;
 }
@@ -946,27 +962,33 @@ void clear_stop() noexcept
 
 void poll()
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
     lora_poll_hardware();
 }
 
 bool send_text(const char *payload)
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
     return lora_send_text_packet(payload);
 }
 
 void start_receive()
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
     if (lora_stop_requested()) return;
     lora_start_receive_mode();
 }
 
 void set_tx_mode(bool enabled)
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
+    if (lora_stop_requested()) return;
     lora_apply_mode(enabled);
 }
 
 void shutdown()
 {
+    std::lock_guard<std::mutex> lock(g_lora_mutex);
     lora_release_hardware();
 }
 

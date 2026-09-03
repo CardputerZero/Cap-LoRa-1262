@@ -8,6 +8,7 @@ namespace cap_lora::backend {
 namespace {
 
 struct SdlRuntimeState {
+    bool stop_requested = false;
     bool initialized = false;
     bool hw_ready = false;
     bool tx_mode = false;
@@ -35,6 +36,7 @@ void copy_text(char* destination, size_t capacity, const char* source)
 bool initialize()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.stop_requested) return false;
     g_state.initialized = true;
     g_state.hw_ready = true;
     std::snprintf(g_state.diag, sizeof(g_state.diag), "SDL simulated LoRa ready");
@@ -43,10 +45,14 @@ bool initialize()
 
 void request_stop() noexcept
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_state.stop_requested = true;
 }
 
 void clear_stop() noexcept
 {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_state.stop_requested = false;
 }
 
 void poll()
@@ -82,9 +88,16 @@ void get_info(cap_lora::LoraInfo* info, bool drain_events)
 
 bool send_text(const char* payload)
 {
-    if (!payload || payload[0] == '\0') return false;
+    if (!payload) return false;
+    const size_t payload_length = std::strlen(payload);
+    if (payload_length == 0) return false;
     std::lock_guard<std::mutex> lock(g_mutex);
-    if (!g_state.initialized || !g_state.hw_ready) return false;
+    if (g_state.stop_requested || !g_state.initialized || !g_state.hw_ready) return false;
+    if (payload_length > MAX_TEXT_PAYLOAD) {
+        std::snprintf(g_state.diag, sizeof(g_state.diag),
+                      "payload too long (%zu bytes; max %zu)", payload_length, MAX_TEXT_PAYLOAD);
+        return false;
+    }
     copy_text(g_state.last_tx, sizeof(g_state.last_tx), payload);
     std::snprintf(g_state.last_rx, sizeof(g_state.last_rx), "SDL echo: %.117s", g_state.last_tx);
     g_state.has_sent_message = true;
@@ -99,6 +112,7 @@ bool send_text(const char* payload)
 void start_receive()
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.stop_requested) return;
     g_state.tx_mode = false;
     std::snprintf(g_state.diag, sizeof(g_state.diag), "SDL simulated receive mode");
 }
@@ -106,6 +120,7 @@ void start_receive()
 void set_tx_mode(bool enabled)
 {
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_state.stop_requested) return;
     g_state.tx_mode = enabled;
     std::snprintf(g_state.diag, sizeof(g_state.diag), "%s",
                   enabled ? "SDL simulated TX mode" : "SDL simulated RX mode");
@@ -117,6 +132,11 @@ void shutdown()
     g_state.initialized = false;
     g_state.hw_ready = false;
     g_state.tx_mode = false;
+    // Hardware shutdown clears edge/event latches while retaining message
+    // history; mirror that lifecycle so a reopened page cannot replay stale
+    // TX/RX notifications.
+    g_state.rx_event = false;
+    g_state.tx_event = false;
     std::snprintf(g_state.diag, sizeof(g_state.diag), "SDL simulated LoRa shutdown");
 }
 
