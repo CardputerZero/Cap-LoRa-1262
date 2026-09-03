@@ -143,7 +143,7 @@ void LoraScreen::tick(uint32_t)
 bool LoraScreen::handleKey(uint32_t key)
 {
     if (!app_active_) return false;
-    return handle_key(key);
+    return handle_key(lora_app_detail::normalize_lora_key(key, model_.view()));
 }
 
 void LoraScreen::init_lora()

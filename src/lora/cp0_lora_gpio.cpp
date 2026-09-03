@@ -91,7 +91,7 @@ bool open_input_line(const char *chip_path, int offset, int *line_fd)
     request.lines = 1;
     request.lineoffsets[0] = (uint32_t)offset;
     request.flags = GPIOHANDLE_REQUEST_INPUT;
-    snprintf(request.consumer_label, sizeof(request.consumer_label), "applaunch-lora-in");
+    snprintf(request.consumer_label, sizeof(request.consumer_label), "cap-lora-in");
     const bool ok = ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, &request) == 0;
     close(chip_fd);
     if (ok) *line_fd = request.fd;
@@ -116,7 +116,7 @@ bool open_input_event_line(const char *chip_path, int offset, int *line_fd)
     request.lineoffset = (uint32_t)offset;
     request.handleflags = GPIOHANDLE_REQUEST_INPUT;
     request.eventflags = GPIOEVENT_REQUEST_RISING_EDGE;
-    snprintf(request.consumer_label, sizeof(request.consumer_label), "applaunch-lora-irq");
+    snprintf(request.consumer_label, sizeof(request.consumer_label), "cap-lora-irq");
     const bool ok = ioctl(chip_fd, GPIO_GET_LINEEVENT_IOCTL, &request) == 0;
     close(chip_fd);
     if (!ok) return false;
@@ -202,7 +202,7 @@ bool gpio_open_output_line(const char *chip_path, int offset, int value, int *li
     request.lineoffsets[0] = (uint32_t)offset;
     request.flags = GPIOHANDLE_REQUEST_OUTPUT;
     request.default_values[0] = (uint8_t)(value ? 1 : 0);
-    snprintf(request.consumer_label, sizeof(request.consumer_label), "applaunch-lora-5v");
+    snprintf(request.consumer_label, sizeof(request.consumer_label), "cap-lora-5v");
     const bool ok = ioctl(chip_fd, GPIO_GET_LINEHANDLE_IOCTL, &request) == 0;
     close(chip_fd);
     if (ok) *line_fd = request.fd;

@@ -24,6 +24,18 @@
 
 namespace lora_app_detail {
 struct LoraInitializationState;
+
+// APPLaunch exposes F/X as navigation shortcuts outside the send editor.
+// The keypad and SDL paths both deliver these keys as printable ASCII, so the
+// view state must be considered before dispatching them to the page handler.
+inline uint32_t normalize_lora_key(uint32_t key, LoraView view) noexcept
+{
+    if (view != LoraView::SEND) {
+        if (key == 'f' || key == 'F') return LV_KEY_UP;
+        if (key == 'x' || key == 'X') return LV_KEY_DOWN;
+    }
+    return key;
+}
 }
 
 class LoraScreen {

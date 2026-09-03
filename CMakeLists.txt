@@ -153,14 +153,20 @@ set(CAP_LORA_APP_CPP
     "${CAP_LORA_SRC_DIR}/views/lora_screen.cpp"
     "${CAP_LORA_SRC_DIR}/views/lora_screen_render.cpp"
     "${CAP_LORA_SRC_DIR}/hal/gps_lvgl_hal.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/lora_backend.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_device_discovery.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_gpio.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_hat_power_controller.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_pi4io_controller.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_runtime_policy.cpp"
-    "${CAP_LORA_SRC_DIR}/lora/cp0_lora_spi_device.cpp"
 )
+if(CAP_LORA_USE_SDL)
+    list(APPEND CAP_LORA_APP_CPP "${CAP_LORA_SRC_DIR}/lora/lora_backend_sdl.cpp")
+else()
+    list(APPEND CAP_LORA_APP_CPP
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_device_discovery.cpp"
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_gpio.cpp"
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_hat_power_controller.cpp"
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_pi4io_controller.cpp"
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_runtime_policy.cpp"
+        "${CAP_LORA_SRC_DIR}/lora/cp0_lora_spi_device.cpp"
+    )
+    list(APPEND CAP_LORA_APP_CPP "${CAP_LORA_SRC_DIR}/lora/lora_backend.cpp")
+endif()
 
 add_executable(${CAP_LORA_BIN_NAME} ${CAP_LORA_APP_CPP})
 target_include_directories(${CAP_LORA_BIN_NAME} PRIVATE "${CAP_LORA_SRC_DIR}")
@@ -192,9 +198,22 @@ if(BUILD_TESTING)
 
     add_executable(cap_lora_model_tests tests/lora_page_model_test.cpp src/models/lora_page_model.cpp)
     target_include_directories(cap_lora_model_tests PRIVATE "${CAP_LORA_SRC_DIR}")
-    target_link_libraries(cap_lora_model_tests PRIVATE smooth_ui_toolkit spdlog::spdlog Threads::Threads)
+    target_link_libraries(cap_lora_model_tests PRIVATE smooth_ui_toolkit spdlog::spdlog lvgl::lvgl Threads::Threads)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(cap_lora_model_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME cap_lora_model COMMAND cap_lora_model_tests)
+
+    if(CAP_LORA_USE_SDL)
+        add_executable(cap_lora_sdl_backend_tests
+            tests/lora_backend_sdl_test.cpp
+            src/lora/lora_backend_sdl.cpp
+        )
+        target_include_directories(cap_lora_sdl_backend_tests PRIVATE "${CAP_LORA_SRC_DIR}")
+        target_link_libraries(cap_lora_sdl_backend_tests PRIVATE Threads::Threads)
+        if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+            target_compile_options(cap_lora_sdl_backend_tests PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+        add_test(NAME cap_lora_sdl_backend COMMAND cap_lora_sdl_backend_tests)
+    endif()
 endif()

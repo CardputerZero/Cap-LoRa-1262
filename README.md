@@ -63,15 +63,25 @@ Key controls:
 - Enter: compose a message or retry initialization after an error
 - Esc: close a dialog or exit
 
-The SDL build displays the complete LoRa UI, but hardware initialization remains
-unavailable until it is run on a CardputerZero with the Cap attached.
+The SDL build displays the complete LoRa UI and uses a simulated backend for
+initialization, send, and receive/echo testing. It does not access SPI, GPIO,
+or I2C; real hardware initialization is performed only by a device build on a
+CardputerZero with the Cap attached.
 
 ## Hardware
 
 The device build initializes the Cap's SX1262 over SPI and controls reset,
-busy, IRQ, and power through the CardputerZero GPIO/I2C interfaces. SPI and
-GPIO paths can be overridden with the `CAP_LORA_*` environment variables used
-by the backend.
+busy, IRQ, and power through the CardputerZero GPIO/I2C interfaces. The
+backend accepts these optional environment-variable overrides (the defaults
+match the CardputerZero Cap wiring):
+
+| Variable | Purpose |
+| --- | --- |
+| `LORA_SPI_DEV` | Explicit SPI device path (otherwise probes `/dev/spidev0.1`, then `/dev/spidev0.0`) |
+| `LORA_RST_CHIP`, `LORA_RST_OFFSET` | GPIO chip and line for SX1262 reset |
+| `LORA_BUSY_CHIP`, `LORA_BUSY_OFFSET` | GPIO chip and line for SX1262 BUSY |
+| `LORA_IRQ_CHIP`, `LORA_IRQ_OFFSET` | GPIO chip and line for SX1262 IRQ |
+| `HAT_5VOUT_CHIP`, `HAT_5VOUT_OFFSET` | I2C GPIO chip and line used to enable Cap 5V power |
 
 The Debian package launches the hardware app as root through a non-interactive,
 command-specific sudo rule for members of the `gpio` group. The rule permits
@@ -81,6 +91,13 @@ for `ext_5v_out`; UART access alone normally works for members of `dialout`.
 Radio initialization errors and SPI/GPIO diagnostics are shown in the app.
 
 ## Package
+
+The executable and package-owned artwork are installed below
+`/usr/share/Cap-LoRa-1262/`. The package also installs a desktop entry under
+`/usr/share/APPLaunch/applications/`, which is the directory scanned by the
+CardputerZero launcher for dynamic applications. Keeping only this desktop
+entry in APPLaunch preserves launcher integration without making the LoRa
+source or executable part of the APPLaunch project.
 
 Build the CardputerZero `arm64` Debian package on an x86 Linux or WSL2 host with
 the Docker wrapper:

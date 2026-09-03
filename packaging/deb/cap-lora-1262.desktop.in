@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=LoRa
-Exec=/usr/bin/sudo -n -- /usr/share/APPLaunch/bin/M5CardputerZero-Cap-LoRa-1262
+Exec=/usr/bin/sudo -n -- @CAP_LORA_EXEC_PATH@
 Terminal=false
-Icon=share/images/cap-lora-1262.png
+Icon=@CAP_LORA_ICON_PATH@
 Type=Application

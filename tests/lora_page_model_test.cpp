@@ -1,5 +1,6 @@
 #include "models/lora_page_model.hpp"
 #include "models/lora_page_contract.hpp"
+#include "views/lora_screen.hpp"
 
 #include <cassert>
 #include <string>
@@ -62,6 +63,14 @@ int main()
     model.reset(true);
     assert(model.view() == LoraView::MESSAGES);
     assert(model.messages().empty());
+
+    assert(lora_app_detail::normalize_lora_key('f', LoraView::MESSAGES) == LV_KEY_UP);
+    assert(lora_app_detail::normalize_lora_key('F', LoraView::MESSAGES) == LV_KEY_UP);
+    assert(lora_app_detail::normalize_lora_key('x', LoraView::MESSAGES) == LV_KEY_DOWN);
+    assert(lora_app_detail::normalize_lora_key('X', LoraView::INFO) == LV_KEY_DOWN);
+    assert(lora_app_detail::normalize_lora_key('f', LoraView::INFO) == LV_KEY_UP);
+    assert(lora_app_detail::normalize_lora_key('f', LoraView::SEND) == 'f');
+    assert(lora_app_detail::normalize_lora_key('X', LoraView::SEND) == 'X');
 
     model.reset(false);
     assert(model.view() == LoraView::INFO);

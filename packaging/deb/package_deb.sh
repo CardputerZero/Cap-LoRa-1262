@@ -13,6 +13,11 @@ BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/package}"
 STAGE_DIR="${STAGE_DIR:-${ROOT_DIR}/build/deb-root}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
 BIN_NAME="M5CardputerZero-Cap-LoRa-1262"
+# Keep package-owned files separate from APPLaunch. The launcher scans this
+# fixed directory for dynamic .desktop entries, while the binary's device
+# resource root is fixed to INSTALL_ROOT by CMake.
+INSTALL_ROOT="/usr/share/Cap-LoRa-1262"
+LAUNCHER_ROOT="/usr/share/APPLaunch"
 CMAKE_BIN="${CMAKE:-cmake}"
 CMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 CAP_LORA_SYSROOT="${CAP_LORA_SYSROOT:-}"
@@ -96,10 +101,6 @@ for path in "${EXECUTABLE}" "${DESKTOP_TEMPLATE}" "${SUDOERS_FILE}" "${ICON_FILE
     fi
 done
 
-if command -v visudo >/dev/null 2>&1; then
-    visudo -c -f "${SUDOERS_FILE}"
-fi
-
 machine="$(${READELF_BIN} -h "${EXECUTABLE}" | awk -F: '/Machine:/ { sub(/^[[:space:]]+/, "", $2); print $2; exit }')"
 if [[ "${machine}" != "AArch64" ]]; then
     echo "Invalid package executable architecture: expected AArch64, got ${machine:-unknown}." >&2
@@ -113,18 +114,40 @@ if [[ "${dynamic_section}" == *"libSDL2"* ]]; then
 fi
 
 rm -rf "${STAGE_DIR}"
-mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/etc/sudoers.d" "${STAGE_DIR}/usr/share/APPLaunch/bin" \
-    "${STAGE_DIR}/usr/share/APPLaunch/applications" \
-    "${STAGE_DIR}/usr/share/APPLaunch/share/images" \
+INSTALL_EXEC_PATH="${INSTALL_ROOT}/bin/${BIN_NAME}"
+INSTALL_ICON_PATH="${INSTALL_ROOT}/share/images/cap-lora-1262.png"
+mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/etc/sudoers.d" \
+    "${STAGE_DIR}${INSTALL_ROOT}/bin" \
+    "${STAGE_DIR}${INSTALL_ROOT}/share/images" \
+    "${STAGE_DIR}${LAUNCHER_ROOT}/applications" \
     "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}" "${DIST_DIR}"
 install -m 755 "${EXECUTABLE}" "${DIST_DIR}/${BIN_NAME}"
-install -m 755 "${EXECUTABLE}" "${STAGE_DIR}/usr/share/APPLaunch/bin/${BIN_NAME}"
-install -m 644 "${DESKTOP_TEMPLATE}" \
-    "${STAGE_DIR}/usr/share/APPLaunch/applications/cap-lora-1262.desktop"
-install -m 440 "${SUDOERS_FILE}" \
-    "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
-install -m 644 "${ICON_FILE}" \
-    "${STAGE_DIR}/usr/share/APPLaunch/share/images/cap-lora-1262.png"
+install -m 755 "${EXECUTABLE}" "${STAGE_DIR}${INSTALL_EXEC_PATH}"
+sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" \
+    -e "s|@CAP_LORA_ICON_PATH@|${INSTALL_ICON_PATH}|g" \
+    "${DESKTOP_TEMPLATE}" >"${STAGE_DIR}${LAUNCHER_ROOT}/applications/cap-lora-1262.desktop"
+sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" "${SUDOERS_FILE}" \
+    >"${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
+chmod 440 "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
+install -m 644 "${ICON_FILE}" "${STAGE_DIR}${INSTALL_ICON_PATH}"
+
+if command -v visudo >/dev/null 2>&1; then
+    visudo -c -f "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
+fi
+
+# Older package revisions placed these two files directly in APPLaunch. Dpkg
+# does not remove ordinary files that disappear from a later package, so clean
+# only those exact legacy paths during an upgrade.
+cat >"${STAGE_DIR}/DEBIAN/postinst" <<EOF
+#!/bin/sh
+set -eu
+if [ "\${1:-}" = configure ]; then
+    rm -f /usr/share/APPLaunch/bin/${BIN_NAME}
+    rm -f /usr/share/APPLaunch/share/images/cap-lora-1262.png
+fi
+exit 0
+EOF
+chmod 755 "${STAGE_DIR}/DEBIAN/postinst"
 install -m 644 "${LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/LICENSE"
 install -m 644 "${THIRD_PARTY_NOTICES_FILE}" \
     "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/THIRD_PARTY_NOTICES.md"
@@ -139,7 +162,7 @@ Architecture: ${DEB_ARCH}
 Maintainer: ${MAINTAINER}
 Depends: libc6, libstdc++6, libgcc-s1, sudo
 Installed-Size: ${INSTALLED_SIZE}
-Description: Cap LoRa-1262 application for M5CardputerZero APPLaunch
+Description: Cap LoRa-1262 application for M5CardputerZero
  LoRa SX1262 text messaging and radio diagnostics for the Cap LoRa-1262 accessory.
 EOF
 
