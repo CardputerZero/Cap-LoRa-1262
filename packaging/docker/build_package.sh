@@ -84,21 +84,22 @@ if [[ ! -f "${ARCHIVE}" ]]; then
     mv "${ARCHIVE}.part" "${ARCHIVE}"
 fi
 
-if [[ -n "${BSP_SHA256}" ]]; then
-    validated_sha256=""
-    if [[ -f "${ARCHIVE_VALIDATION_STAMP}" ]]; then
-        validated_sha256="$(<"${ARCHIVE_VALIDATION_STAMP}")"
+archive_sha256=""
+validated_sha256=""
+if [[ -f "${ARCHIVE_VALIDATION_STAMP}" ]]; then
+    validated_sha256="$(<"${ARCHIVE_VALIDATION_STAMP}")"
+fi
+if [[ -n "${validated_sha256}" && "${ARCHIVE}" -ot "${ARCHIVE_VALIDATION_STAMP}" ]]; then
+    archive_sha256="${validated_sha256}"
+else
+    archive_sha256="$(sha256sum "${ARCHIVE}")"
+    archive_sha256="${archive_sha256%% *}"
+    if [[ -n "${BSP_SHA256}" && "${archive_sha256}" != "${BSP_SHA256}" ]]; then
+        echo "BSP checksum mismatch: expected ${BSP_SHA256}, got ${archive_sha256}." >&2
+        echo "Remove ${ARCHIVE} and retry." >&2
+        exit 1
     fi
-    if [[ "${validated_sha256}" != "${BSP_SHA256}" || "${ARCHIVE}" -nt "${ARCHIVE_VALIDATION_STAMP}" ]]; then
-        archive_sha256="$(sha256sum "${ARCHIVE}")"
-        archive_sha256="${archive_sha256%% *}"
-        if [[ "${archive_sha256}" != "${BSP_SHA256}" ]]; then
-            echo "BSP checksum mismatch: expected ${BSP_SHA256}, got ${archive_sha256}." >&2
-            echo "Remove ${ARCHIVE} and retry." >&2
-            exit 1
-        fi
-        printf "%s\n" "${archive_sha256}" >"${ARCHIVE_VALIDATION_STAMP}"
-    fi
+    printf "%s\n" "${archive_sha256}" >"${ARCHIVE_VALIDATION_STAMP}"
 fi
 
 sysroot_sha256=""
@@ -106,7 +107,7 @@ if [[ -f "${SYSROOT_VALIDATION_STAMP}" ]]; then
     sysroot_sha256="$(<"${SYSROOT_VALIDATION_STAMP}")"
 fi
 if [[ ! -d "${SYSROOT}/usr/include" || ! -d "${SYSROOT}/usr/lib" || \
-      (-n "${BSP_SHA256}" && "${sysroot_sha256}" != "${BSP_SHA256}") ]]; then
+      "${sysroot_sha256}" != "${archive_sha256}" ]]; then
     echo "Preparing CardputerZero BSP sysroot..."
     EXTRACT_DIR="${SYSROOT}.extracting"
     safe_remove_tree "${EXTRACT_DIR}" "${CACHE_DIR}" "BSP extraction"
@@ -122,9 +123,7 @@ if [[ ! -d "${SYSROOT}/usr/include" || ! -d "${SYSROOT}/usr/lib" || \
         echo "Unexpected BSP archive layout: usr/include and usr/lib were not found." >&2
         exit 1
     fi
-    if [[ -n "${BSP_SHA256}" ]]; then
-        printf "%s\n" "${BSP_SHA256}" >"${EXTRACT_DIR}/.cap-lora-bsp-sha256"
-    fi
+    printf "%s\n" "${archive_sha256}" >"${EXTRACT_DIR}/.cap-lora-bsp-sha256"
     mv "${EXTRACT_DIR}" "${SYSROOT}"
 fi
 
