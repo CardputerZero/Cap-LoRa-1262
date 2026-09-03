@@ -29,4 +29,12 @@ grep -Fq 'Exec=/usr/bin/sudo -n -- @CAP_LORA_EXEC_PATH@' \
 grep -Fq '%gpio ALL=(root) NOPASSWD: @CAP_LORA_EXEC_PATH@ ""' \
     "${ROOT_DIR}/packaging/deb/m5cardputerzero-cap-lora-1262.sudoers"
 
+if command -v visudo >/dev/null 2>&1; then
+    sudoers_tmp="$(mktemp)"
+    trap 'rm -f "${sudoers_tmp}"' EXIT
+    sed 's|@CAP_LORA_EXEC_PATH@|/usr/share/Cap-LoRa-1262/bin/M5CardputerZero-Cap-LoRa-1262|g' \
+        "${ROOT_DIR}/packaging/deb/m5cardputerzero-cap-lora-1262.sudoers" >"${sudoers_tmp}"
+    visudo -c -f "${sudoers_tmp}" >/dev/null
+fi
+
 echo "packaging script checks passed"
