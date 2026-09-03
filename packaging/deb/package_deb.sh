@@ -39,6 +39,26 @@ if [[ "${MAINTAINER}" == *$'\n'* || "${MAINTAINER}" == *$'\r'* ]]; then
     die "MAINTAINER must not contain newlines"
 fi
 
+validate_output_path() {
+    local path="$1"
+    local label="$2"
+    local resolved root
+
+    [[ -n "${path}" ]] || die "${label} path must not be empty."
+    resolved="$(realpath -m -- "${path}")"
+    root="$(realpath -m -- "${ROOT_DIR}")"
+    case "${resolved}" in
+        /|/tmp|/usr|/var|/home|/root|"${root}")
+            die "Refusing unsafe ${label} path: ${path}"
+            ;;
+    esac
+    case "${root}/" in
+        "${resolved}"/*)
+            die "Refusing an ancestor of the source tree as ${label}: ${path}"
+            ;;
+    esac
+}
+
 safe_remove_tree() {
     local path="$1"
     local label="$2"
@@ -115,12 +135,20 @@ for command in "${CMAKE_BIN}" "${READELF_BIN}" dpkg-deb realpath; do
     require_command "${command}"
 done
 
+validate_output_path "${BUILD_DIR}" "build"
+validate_output_path "${STAGE_DIR}" "staging"
+validate_output_path "${DIST_DIR}" "distribution"
+
 "${CMAKE_BIN}" "${CMAKE_CONFIGURE_ARGS[@]}"
 if [[ "$(read_cmake_cache_value CAP_LORA_USE_SDL)" != "OFF" ]]; then
     echo "Invalid package build: CAP_LORA_USE_SDL must be OFF." >&2
     exit 1
 fi
 PACKAGE_VERSION="$(read_cmake_cache_value CMAKE_PROJECT_VERSION)"
+if [[ -z "${PACKAGE_VERSION}" || "${PACKAGE_VERSION}" == *$'\n'* || \
+      "${PACKAGE_VERSION}" == *$'\r'* || "${PACKAGE_VERSION}" == */* ]]; then
+    die "Invalid Debian package version: ${PACKAGE_VERSION}"
+fi
 "${CMAKE_BIN}" --build "${BUILD_DIR}" -j"${PARALLEL}"
 
 EXECUTABLE="${BUILD_DIR}/dist/${BIN_NAME}"
