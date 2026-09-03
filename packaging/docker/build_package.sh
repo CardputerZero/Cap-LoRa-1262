@@ -113,8 +113,9 @@ if [[ ! -d "${SYSROOT}/usr/include" || ! -d "${SYSROOT}/usr/lib" || \
     safe_remove_tree "${EXTRACT_DIR}" "${CACHE_DIR}" "BSP extraction"
     safe_remove_tree "${SYSROOT}" "${CACHE_DIR}" "BSP sysroot"
     mkdir -p "${EXTRACT_DIR}"
-    if ! tar -tzf "${ARCHIVE}" | awk '$0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ { bad=1 } END { exit bad }'; then
-        echo "BSP archive contains an unsafe path." >&2
+    if ! tar -tzf "${ARCHIVE}" | awk '$0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ { bad=1 } END { exit bad }' || \
+       tar -tvzf "${ARCHIVE}" | awk 'substr($0, 1, 1) == "l" || substr($0, 1, 1) == "h" { bad=1 } END { exit bad }'; then
+        echo "BSP archive contains an unsafe path or link entry." >&2
         exit 1
     fi
     tar -xzf "${ARCHIVE}" --no-same-owner --no-same-permissions -C "${EXTRACT_DIR}"
