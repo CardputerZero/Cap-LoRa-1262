@@ -99,6 +99,13 @@ CardputerZero launcher for dynamic applications. Keeping only this desktop
 entry in APPLaunch preserves launcher integration without making the LoRa
 source or executable part of the APPLaunch project.
 
+When removing the legacy built-in LoRa page from APPLaunch, keep the
+launcher's `lora` display-order token. The desktop entry uses `Name=LoRa`, and
+that token keeps this external application in the same position as the former
+built-in entry. Disable APPLaunch's `CONFIG_CP0_LVGL_INIT_LORA` (and its
+RadioLib component if no other consumer remains) before deleting the shared
+cp0 LoRa sources.
+
 Build the CardputerZero `arm64` Debian package on an x86 Linux or WSL2 host with
 the Docker wrapper:
 
