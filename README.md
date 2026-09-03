@@ -106,6 +106,12 @@ the Docker wrapper:
 ./packaging/docker/package_deb.sh
 ```
 
+The Docker packager downloads the CardputerZero BSP over HTTPS and verifies the
+published SHA-256 for `v0.0.4`. For another BSP release, set both
+`BSP_VERSION`/`BSP_URL` and its 64-character `BSP_SHA256` before running the
+wrapper. An unverified archive is refused by default; only a trusted local
+mirror should use `CAP_LORA_ALLOW_UNVERIFIED_BSP=1`.
+
 To package natively on a CardputerZero instead, run:
 
 ```bash

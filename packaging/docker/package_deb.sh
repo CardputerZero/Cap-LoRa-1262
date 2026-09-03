@@ -75,6 +75,7 @@ BUILD_ARGS+=("${SCRIPT_DIR}")
     --env "BSP_VERSION=${BSP_VERSION:-v0.0.4}" \
     --env "BSP_URL=${BSP_URL:-}" \
     --env "BSP_SHA256=${BSP_SHA256:-}" \
+    --env "CAP_LORA_ALLOW_UNVERIFIED_BSP=${CAP_LORA_ALLOW_UNVERIFIED_BSP:-0}" \
     --env "CLEAN=${CLEAN}" \
     --env "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}" \
     --env "PACKAGE_SUFFIX=${PACKAGE_SUFFIX:-m5stack1}" \

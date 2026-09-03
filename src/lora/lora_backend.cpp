@@ -704,6 +704,9 @@ static void lora_service_irq_once(void)
     } else if (irq_flags & RADIOLIB_SX126X_IRQ_TIMEOUT) {
         snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "RX timeout irq=0x%04lX", (unsigned long)irq_flags);
         SLOGI("LoRa RX timeout: %s", g_lora.last_diag);
+        // A receive timeout leaves SX1262 out of continuous receive mode;
+        // restart RX so the page continues listening after an idle period.
+        if (!g_lora.tx_mode) lora_start_receive_mode();
     }
 }
 

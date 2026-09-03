@@ -24,6 +24,42 @@ CAP_LORA_SYSROOT="${CAP_LORA_SYSROOT:-}"
 CAP_LORA_FORCE_CROSS="${CAP_LORA_FORCE_CROSS:-0}"
 READELF_BIN="${READELF:-readelf}"
 
+die() {
+    echo "$*" >&2
+    exit 1
+}
+
+if [[ ! "${PACKAGE_NAME}" =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
+    die "Invalid Debian package name: ${PACKAGE_NAME}"
+fi
+if [[ ! "${PACKAGE_SUFFIX}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
+    die "Invalid package filename suffix: ${PACKAGE_SUFFIX}"
+fi
+if [[ "${MAINTAINER}" == *$'\n'* || "${MAINTAINER}" == *$'\r'* ]]; then
+    die "MAINTAINER must not contain newlines"
+fi
+
+safe_remove_tree() {
+    local path="$1"
+    local label="$2"
+    local resolved root
+
+    [[ -n "${path}" ]] || die "Refusing to remove an empty ${label} path."
+    resolved="$(realpath -m -- "${path}")"
+    root="$(realpath -m -- "${ROOT_DIR}")"
+    case "${resolved}" in
+        /|/tmp|/usr|/var|/home|/root|"${root}")
+            die "Refusing to remove unsafe ${label} path: ${path}"
+            ;;
+    esac
+    case "${root}/" in
+        "${resolved}"/*)
+            die "Refusing to remove an ancestor of the source tree: ${path}"
+            ;;
+    esac
+    rm -rf -- "${path}"
+}
+
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "Required command not found: $1" >&2
@@ -75,7 +111,7 @@ if [[ "${CAP_LORA_FORCE_CROSS}" == "1" || ("${host_arch}" != "aarch64" && "${hos
     CMAKE_CONFIGURE_ARGS+=(-DCMAKE_SYSROOT="${CAP_LORA_SYSROOT}")
 fi
 
-for command in "${CMAKE_BIN}" "${READELF_BIN}" dpkg-deb; do
+for command in "${CMAKE_BIN}" "${READELF_BIN}" dpkg-deb realpath; do
     require_command "${command}"
 done
 
@@ -113,7 +149,7 @@ if [[ "${dynamic_section}" == *"libSDL2"* ]]; then
     exit 1
 fi
 
-rm -rf "${STAGE_DIR}"
+safe_remove_tree "${STAGE_DIR}" "Debian staging"
 INSTALL_EXEC_PATH="${INSTALL_ROOT}/bin/${BIN_NAME}"
 INSTALL_ICON_PATH="${INSTALL_ROOT}/share/images/cap-lora-1262.png"
 mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/etc/sudoers.d" \
