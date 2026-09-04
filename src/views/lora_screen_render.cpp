@@ -612,7 +612,12 @@ lv_obj_t *LoraScreen::append_message_row(const LoraChatMessage &message)
 {
     if (!message_list_) return nullptr;
     char metadata[64] = "";
-    if (!message.outgoing) std::snprintf(metadata, sizeof(metadata), "%.0f dBm  /  %.1f dB", message.rssi, message.snr);
+    if (!message.outgoing)
+        std::snprintf(metadata, sizeof(metadata), "%.0f dBm  /  %.1f dB", message.rssi, message.snr);
+    else if (message.delivery == LoraMessageDelivery::PENDING)
+        std::snprintf(metadata, sizeof(metadata), "Sending");
+    else if (message.delivery == LoraMessageDelivery::FAILED)
+        std::snprintf(metadata, sizeof(metadata), "Failed");
 
     static constexpr int32_t HORIZONTAL_PADDING = 10;
     static constexpr int32_t MAX_TEXT_WIDTH     = 224;
@@ -636,8 +641,11 @@ lv_obj_t *LoraScreen::append_message_row(const LoraChatMessage &message)
     if (message.outgoing) lv_obj_add_flag(row, LV_OBJ_FLAG_USER_1);
     lv_obj_add_event_cb(row, bubble_tail_draw_cb, LV_EVENT_DRAW_MAIN_END, nullptr);
 
+    uint32_t bubble_color = message.outgoing ? 0x3FCC75 : 0xCCCCCC;
+    if (message.delivery == LoraMessageDelivery::PENDING) bubble_color = 0xD6B75C;
+    if (message.delivery == LoraMessageDelivery::FAILED) bubble_color = 0xD96C6C;
     lv_obj_t *bubble = make_panel(row, 0, 0, bubble_width, LV_SIZE_CONTENT,
-                                  lv_color_hex(message.outgoing ? 0x3FCC75 : 0xCCCCCC), LV_OPA_COVER, 8);
+                                  lv_color_hex(bubble_color), LV_OPA_COVER, 8);
     if (!bubble) return row;
     lv_obj_set_style_margin_left(bubble, message.outgoing ? 0 : lora_app_detail::kBubbleTailWidth,
                                  LV_PART_MAIN | LV_STATE_DEFAULT);

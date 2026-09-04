@@ -60,6 +60,7 @@ private:
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
     std::thread init_thread_;
     uint32_t last_init_attempt_tick_ = 0;
+    std::string pending_tx_text_;
 
     lv_timer_t *poll_timer_ = nullptr;
     lv_timer_t *message_title_timer_    = nullptr;
@@ -141,7 +142,10 @@ private:
 
     lv_obj_t *append_message_row(const LoraChatMessage &message);
 
-    void append_chat_message(const char *text, bool outgoing, float rssi, float snr);
+    void append_chat_message(const char *text, bool outgoing, float rssi, float snr,
+                             LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED);
+    void rebuild_message_list();
+    void settle_pending_transmit();
     void open_send_view(uint32_t first_key);
     void scroll_messages(int32_t amount);
     void cancel_send();

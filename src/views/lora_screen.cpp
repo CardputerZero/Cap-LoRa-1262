@@ -116,6 +116,9 @@ void LoraScreen::onEnter(lv_obj_t* parent)
 
 void LoraScreen::onExit()
 {
+    if (!app_active_ && !poll_timer_ && !initialization_state_ &&
+        !init_thread_.joinable() && !page_root_)
+        return;
     cancel_view_animations();
     cancel_message_title_animation();
     app_active_ = false;
@@ -129,6 +132,7 @@ void LoraScreen::onExit()
     cap_lora::backend::shutdown();
     initialization_state_.reset();
     initialization_pending_ = false;
+    pending_tx_text_.clear();
     detach_delete_callbacks();
     if (page_root_) lv_obj_delete(page_root_);
     page_root_ = nullptr;
@@ -229,7 +233,8 @@ bool LoraScreen::refresh_lora_info(bool poll)
     return true;
 }
 
-void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr)
+void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr,
+                                     LoraMessageDelivery delivery)
 {
     if (!message_list_) return;
     // A new bubble should never sit underneath the temporary Messages HUD.
@@ -241,7 +246,7 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         lv_obj_t *oldest_row = lv_obj_get_child(message_list_, 0);
         if (oldest_row) lv_obj_delete(oldest_row);
     }
-    model_.append_message(text ? text : "", outgoing, rssi, snr);
+    model_.append_message(text ? text : "", outgoing, rssi, snr, delivery);
     last_message_row_ = append_message_row(model_.messages().back());
     set_visible(empty_message_label_, false);
     set_visible(empty_message_hint_label_, false);
@@ -249,6 +254,34 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         scroll_to_latest(LV_ANIM_ON);
     else
         scroll_to_latest_pending_ = true;
+}
+
+void LoraScreen::rebuild_message_list()
+{
+    if (!message_list_) return;
+    lv_obj_clean(message_list_);
+    last_message_row_ = nullptr;
+    for (const auto &message : model_.messages()) last_message_row_ = append_message_row(message);
+    const bool empty = model_.messages().empty();
+    set_visible(empty_message_label_, empty);
+    set_visible(empty_message_hint_label_, empty);
+    if (!empty) scroll_to_latest(LV_ANIM_ON);
+}
+
+void LoraScreen::settle_pending_transmit()
+{
+    if (pending_tx_text_.empty()) return;
+    bool completed = false;
+    bool sent      = false;
+    if (lora_info_.tx_event && std::strcmp(lora_info_.last_tx, pending_tx_text_.c_str()) == 0) {
+        completed = true;
+        sent      = true;
+    } else if (!lora_info_.tx_in_progress) {
+        completed = true;
+    }
+    if (!completed) return;
+    if (model_.resolve_latest_pending(sent)) rebuild_message_list();
+    pending_tx_text_.clear();
 }
 
 void LoraScreen::open_send_view(uint32_t first_key)
@@ -323,8 +356,9 @@ bool LoraScreen::handle_key(uint32_t key)
 {
     if (model_.view() == LoraView::SEND) return handle_send_key(key);
     if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
-        onExit();
-        return true;
+        // LoraApp converts an unhandled exit key into a quit request. Avoid
+        // joining the initialization worker from inside an input callback.
+        return false;
     }
     return handle_navigation_key(key);
 }
@@ -353,9 +387,11 @@ void LoraScreen::send_current_text()
     }
     std::string sent_text(model_.tx_input());
     if (cap_lora::backend::send_text(sent_text.c_str())) {
-        refresh_lora_info(false);
-        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f);
+        pending_tx_text_ = sent_text;
+        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, LoraMessageDelivery::PENDING);
         model_.complete_send();
+        refresh_lora_info(false);
+        settle_pending_transmit();
         render_current_view();
     } else {
         model_.set_send_status("Send failed");
@@ -381,6 +417,7 @@ void LoraScreen::on_poll_timer()
         return;
     }
     if (!refresh_lora_info(true)) return;
+    settle_pending_transmit();
     if (lora_info_.rx_event) append_chat_message(lora_info_.last_rx, false, lora_info_.rssi, lora_info_.snr);
     if (model_.view() == LoraView::INFO) update_info_content();
 }

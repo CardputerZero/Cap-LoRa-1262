@@ -6,12 +6,14 @@
 #include <utility>
 
 enum class LoraView { MESSAGES, INFO, SEND };
+enum class LoraMessageDelivery { RECEIVED, PENDING, SENT, FAILED };
 
 struct LoraChatMessage {
     std::string text;
     bool outgoing = false;
     float rssi = 0.0f;
     float snr = 0.0f;
+    LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED;
 };
 
 class LoraPageModel
@@ -31,7 +33,9 @@ public:
     void set_send_status(std::string status) { send_status_ = std::move(status); }
     void complete_send();
 
-    void append_message(std::string text, bool outgoing, float rssi, float snr);
+    void append_message(std::string text, bool outgoing, float rssi, float snr,
+                        LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED);
+    bool resolve_latest_pending(bool sent);
 
     const std::string &tx_input() const { return tx_input_; }
     const std::string &send_status() const { return send_status_; }

@@ -196,6 +196,40 @@ if(BUILD_TESTING)
     target_include_directories(cap_lora_runtime_policy_tests PRIVATE "${CAP_LORA_SRC_DIR}")
     add_test(NAME cap_lora_runtime_policy COMMAND cap_lora_runtime_policy_tests)
 
+    if(NOT CAP_LORA_USE_SDL)
+        add_executable(cap_lora_hat_power_resource_tests
+            tests/lora_hat_power_controller_resource_test.cpp)
+        target_include_directories(cap_lora_hat_power_resource_tests PRIVATE
+            "${CAP_LORA_ROOT}/tests" "${CAP_LORA_SRC_DIR}")
+        target_link_libraries(cap_lora_hat_power_resource_tests PRIVATE Threads::Threads)
+        add_test(NAME cap_lora_hat_power_resource COMMAND cap_lora_hat_power_resource_tests)
+
+        add_executable(cap_lora_pi4io_resource_tests
+            tests/lora_pi4io_controller_resource_test.cpp)
+        target_include_directories(cap_lora_pi4io_resource_tests PRIVATE
+            "${CAP_LORA_ROOT}/tests" "${CAP_LORA_SRC_DIR}")
+        target_link_libraries(cap_lora_pi4io_resource_tests PRIVATE Threads::Threads)
+        add_test(NAME cap_lora_pi4io_resource COMMAND cap_lora_pi4io_resource_tests)
+
+        add_executable(cap_lora_spi_resource_tests tests/lora_spi_device_resource_test.cpp)
+        target_include_directories(cap_lora_spi_resource_tests PRIVATE
+            "${CAP_LORA_ROOT}/tests" "${CAP_LORA_SRC_DIR}")
+        add_test(NAME cap_lora_spi_resource COMMAND cap_lora_spi_resource_tests)
+
+        add_executable(cap_lora_device_discovery_tests
+            tests/lora_device_discovery_test.cpp src/lora/cp0_lora_device_discovery.cpp)
+        target_include_directories(cap_lora_device_discovery_tests PRIVATE
+            "${CAP_LORA_ROOT}/tests" "${CAP_LORA_SRC_DIR}")
+        add_test(NAME cap_lora_device_discovery COMMAND cap_lora_device_discovery_tests)
+
+        add_executable(cap_lora_gpio_sysfs_resource_tests
+            tests/lora_gpio_sysfs_resource_test.cpp)
+        target_include_directories(cap_lora_gpio_sysfs_resource_tests PRIVATE
+            "${CAP_LORA_ROOT}/tests" "${CAP_LORA_SRC_DIR}")
+        target_link_libraries(cap_lora_gpio_sysfs_resource_tests PRIVATE Threads::Threads)
+        add_test(NAME cap_lora_gpio_sysfs_resource COMMAND cap_lora_gpio_sysfs_resource_tests)
+    endif()
+
     add_executable(cap_lora_model_tests tests/lora_page_model_test.cpp src/models/lora_page_model.cpp)
     target_include_directories(cap_lora_model_tests PRIVATE "${CAP_LORA_SRC_DIR}")
     target_link_libraries(cap_lora_model_tests PRIVATE smooth_ui_toolkit spdlog::spdlog lvgl::lvgl Threads::Threads)
@@ -215,5 +249,12 @@ if(BUILD_TESTING)
             target_compile_options(cap_lora_sdl_backend_tests PRIVATE -Wall -Wextra -Wpedantic)
         endif()
         add_test(NAME cap_lora_sdl_backend COMMAND cap_lora_sdl_backend_tests)
+        add_test(NAME cap_lora_shutdown_signals
+            COMMAND bash "${CAP_LORA_ROOT}/tests/shutdown_signal_test.sh"
+                    "$<TARGET_FILE:${CAP_LORA_BIN_NAME}>")
+        set_tests_properties(cap_lora_shutdown_signals PROPERTIES TIMEOUT 8)
     endif()
+
+    add_test(NAME cap_lora_packaging_scripts
+        COMMAND bash "${CAP_LORA_ROOT}/tests/packaging_scripts_test.sh")
 endif()

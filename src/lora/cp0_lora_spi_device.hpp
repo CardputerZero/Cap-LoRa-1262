@@ -17,6 +17,7 @@ public:
     const char *path() const;
     void set_path(const char *path);
     bool is_open() const;
+    int last_error() const;
     bool open();
     void close();
     bool transfer(const uint8_t *tx, uint8_t *rx, size_t length);
@@ -25,6 +26,7 @@ private:
     int fd_ = -1;
     char path_[64] = {};
     uint32_t speed_hz_;
+    int last_error_ = 0;
 };
 
 } // namespace cp0_lora

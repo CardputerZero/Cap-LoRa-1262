@@ -14,8 +14,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
-#include <poll.h>
+#include <memory>
 #include <mutex>
+#include <new>
+#include <poll.h>
 #include <unistd.h>
 
 #ifndef SLOGI
@@ -57,6 +59,9 @@ protected:
 #endif
 
 namespace cap_lora::backend {
+constexpr RadioLibTime_t RADIOLIB_BUSY_TIMEOUT_MS = 100;
+constexpr RadioLibTime_t RADIOLIB_PULSE_TIMEOUT_US = 100000;
+
 // ============================================================
 //  Hardware configuration and state
 // ============================================================
@@ -86,6 +91,8 @@ struct LoraRuntimeState {
     bool rx_event             = false;
     bool tx_event             = false;
     bool has_sent_message     = false;
+    bool spi_transfer_failed  = false;
+    int spi_error             = 0;
 
     uint32_t tx_counter      = 0;
     uint64_t tx_start_ms     = 0;
@@ -111,9 +118,17 @@ struct LoraRuntimeState {
         tx_done             = false;
         rx_event            = false;
         tx_event            = false;
+        spi_transfer_failed = false;
+        spi_error           = 0;
         tx_start_ms         = 0;
         tx_timeout_ms       = cp0_lora_runtime_policy::TX_TIMEOUT_MS;
         last_auto_tx_ms     = 0;
+    }
+
+    void clear_spi_error()
+    {
+        spi_transfer_failed = false;
+        spi_error           = 0;
     }
 
     void reset_radio()
@@ -143,6 +158,8 @@ private:
 
 static LoraRuntimeState g_lora;
 static std::atomic<bool> g_stop_requested{false};
+static thread_local bool g_cleanup_io_allowed = false;
+static thread_local uint64_t g_busy_high_since_ms = 0;
 // The initialization worker and LVGL timer share the RadioLib instance and
 // state.  Serialize public operations so shutdown cannot delete the radio
 // while a poll/send/get_info call is using it.
@@ -151,6 +168,11 @@ static std::mutex g_lora_mutex;
 static bool lora_stop_requested()
 {
     return g_stop_requested.load(std::memory_order_acquire);
+}
+
+static bool lora_hal_cancel_requested()
+{
+    return lora_stop_requested() && !g_cleanup_io_allowed;
 }
 
 // Forward declarations
@@ -168,24 +190,58 @@ static const char *lora_radiolib_status_text(int16_t state);
 static bool lora_send_text_packet(const char *payload);
 static void lora_init_hardware(void);
 
+class CleanupIoScope {
+public:
+    CleanupIoScope() { g_cleanup_io_allowed = true; }
+    ~CleanupIoScope() { g_cleanup_io_allowed = false; }
+};
+
+static void lora_quiesce_radio(SX1262 *radio)
+{
+    if (radio == nullptr || !g_lora.spi.is_open()) return;
+
+    CleanupIoScope cleanup_scope;
+    g_lora.clear_spi_error();
+    try {
+        const int16_t standby_state = radio->standby();
+        const int16_t irq_state     = radio->clearIrqFlags(RADIOLIB_SX126X_IRQ_ALL);
+        const int16_t sleep_state   = radio->sleep();
+        SLOGI("LoRa shutdown: standby=%d clear_irq=%d sleep=%d spi_error=%d", (int)standby_state,
+              (int)irq_state, (int)sleep_state, g_lora.spi_error);
+    } catch (...) {
+        SLOGI("LoRa shutdown: RadioLib cleanup raised an exception");
+    }
+}
+
 static void lora_release_hardware()
 {
+    lora_quiesce_radio(g_lora.radio);
     g_lora.reset_radio();
     g_lora.spi.close();
     g_lora.close_gpio_lines();
+    cp0_lora_backend::gpio_release_all_sysfs();
+    cp0_lora_pi4io_controller::shutdown();
     cp0_lora_hat_power_controller::shutdown();
     g_lora.reset_runtime_flags();
 }
 
 static bool lora_spi_transfer(const uint8_t *tx, uint8_t *rx, size_t len)
 {
-    return g_lora.spi.transfer(tx, rx, len);
+    if (g_lora.spi.transfer(tx, rx, len)) return true;
+
+    g_lora.spi_transfer_failed = true;
+    g_lora.spi_error           = g_lora.spi.last_error();
+    snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "SPI transfer failed on %s errno=%d(%s)",
+             g_lora.spi.path(), g_lora.spi_error, strerror(g_lora.spi_error));
+    return false;
 }
 
 static bool lora_open_runtime_spi(void)
 {
     if (g_lora.spi.open()) return true;
-    snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "runtime SPI open/config failed on %s", g_lora.spi.path());
+    const int error = g_lora.spi.last_error();
+    snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "runtime SPI open/config/lock failed on %s errno=%d(%s)",
+             g_lora.spi.path(), error, strerror(error));
     return false;
 }
 
@@ -244,25 +300,39 @@ static bool probe_lora_spi_device(void)
         snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "SPI: no spidev found");
         return false;
     }
-    SLOGI("LoRa SPI probe policy: prefer SPI0 only, CE1 then CE0");
+    SLOGI("LoRa SPI probe policy: explicit override, otherwise SPI0 CE1 then CE0 only");
     summary[0] = '\0';
     for (size_t i = 0; i < candidate_count; ++i) {
         const char *dev = candidates[i];
         if (spi_env && spi_env[0] && strcmp(spi_env, dev) == 0) continue;
-        if (summary[0]) strncat(summary, ", ", sizeof(summary) - strlen(summary) - 1);
-        strncat(summary, dev, sizeof(summary) - strlen(summary) - 1);
+        size_t used = strlen(summary);
+        if (used > 0 && used < sizeof(summary) - 1) {
+            const size_t separator_size = sizeof(", ") - 1;
+            const size_t copy_size = separator_size < sizeof(summary) - used - 1
+                                         ? separator_size
+                                         : sizeof(summary) - used - 1;
+            memcpy(summary + used, ", ", copy_size);
+            used += copy_size;
+            summary[used] = '\0';
+        }
+        if (used >= sizeof(summary) - 1) break;
+        const size_t dev_size = strnlen(dev, sizeof(candidates[0]));
+        const size_t copy_size = dev_size < sizeof(summary) - used - 1
+                                     ? dev_size
+                                     : sizeof(summary) - used - 1;
+        memcpy(summary + used, dev, copy_size);
+        summary[used + copy_size] = '\0';
     }
     if (spi_env && spi_env[0]) {
-        snprintf(g_lora.probe_summary, sizeof(g_lora.probe_summary), "probe order: %.96s%s%.128s", spi_env,
-                 summary[0] ? ", " : "", summary);
-        snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "Try: %.96s -> 0.1 -> 0.0", spi_env);
+        snprintf(g_lora.probe_summary, sizeof(g_lora.probe_summary), "explicit probe: %.224s", spi_env);
+        snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "Try: %.96s", spi_env);
     } else {
         snprintf(g_lora.probe_summary, sizeof(g_lora.probe_summary), "probe order: %.224s", summary);
         snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "Try: /dev/spidev0.1 -> /dev/spidev0.0");
     }
 
     auto try_probe = [](const char *dev) -> bool {
-        if (dev == NULL || dev[0] == '\0' || access(dev, F_OK) != 0) return false;
+        if (lora_stop_requested() || dev == NULL || dev[0] == '\0' || access(dev, F_OK) != 0) return false;
         g_lora.spi.set_path(dev);
         g_lora.nss_manual    = false;
         const char *spi_path = g_lora.spi.path();
@@ -281,13 +351,26 @@ static bool probe_lora_spi_device(void)
         }
         uint8_t status = 0;
         if (!g_lora.spi.open()) {
-            snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "SPI open/config failed on %s", spi_path);
+            const int error = g_lora.spi.last_error();
+            snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "SPI open/config/lock failed on %s errno=%d(%s)",
+                     spi_path, error, strerror(error));
             return false;
         }
+        g_lora.clear_spi_error();
         bool ok = sx1262_get_status_raw(&status);
-        g_lora.spi.close();
         if (!ok) {
             snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "status read failed on %s", spi_path);
+            g_lora.spi.close();
+            return false;
+        }
+        if (status == 0x00 || status == 0xFF) {
+            snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "invalid SX1262 status 0x%02X on %s", status,
+                     spi_path);
+            g_lora.spi.close();
+            return false;
+        }
+        if (lora_stop_requested()) {
+            g_lora.spi.close();
             return false;
         }
         SLOGI("LoRa probe: %s [%s] (cs=hw-auto) status=0x%02X", spi_path, cs_name, status);
@@ -297,13 +380,14 @@ static bool probe_lora_spi_device(void)
         return true;
     };
 
-    if (spi_env && spi_env[0] && try_probe(spi_env)) return true;
     for (size_t i = 0; i < candidate_count; ++i) {
         if (try_probe(candidates[i])) return true;
+        if (lora_stop_requested()) break;
     }
     snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "all SPI buses probed, no SX1262 response (%.192s)",
              g_lora.probe_summary);
-    snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "NOT FOUND: tried 0.1 and 0.0");
+    snprintf(g_lora.probe_display, sizeof(g_lora.probe_display), "%s",
+             spi_env && spi_env[0] ? "NOT FOUND: explicit SPI device" : "NOT FOUND: tried 0.1 and 0.0");
     return false;
 }
 
@@ -337,7 +421,7 @@ public:
 
     void pinMode(uint32_t pin, uint32_t mode) override
     {
-        if (pin == RADIOLIB_NC) return;
+        if (pin == RADIOLIB_NC || lora_hal_cancel_requested()) return;
         if (mode == GpioModeOutput) {
             if (pin == (uint32_t)g_lora.rst_gpio) {
                 (void)cp0_lora_backend::gpio_init_output_any("LORA_RST_CHIP", "LORA_RST_OFFSET", (int)pin, 1, &g_lora.rst_fd, "RST");
@@ -351,7 +435,7 @@ public:
 
     void digitalWrite(uint32_t pin, uint32_t value) override
     {
-        if (pin == RADIOLIB_NC) return;
+        if (pin == RADIOLIB_NC || lora_hal_cancel_requested()) return;
         int line_fd = -1;
         if (pin == (uint32_t)g_lora.rst_gpio) line_fd = g_lora.rst_fd;
         (void)cp0_lora_backend::gpio_set_value_any((int)pin, line_fd, value ? 1 : 0);
@@ -359,10 +443,26 @@ public:
 
     uint32_t digitalRead(uint32_t pin) override
     {
-        if (pin == RADIOLIB_NC) return 0;
+        if (pin == RADIOLIB_NC || lora_hal_cancel_requested()) {
+            g_busy_high_since_ms = 0;
+            return 0;
+        }
         int line_fd = -1;
         if (pin == (uint32_t)g_lora.busy_gpio) line_fd = g_lora.busy_fd;
         int value = cp0_lora_backend::gpio_get_value_any((int)pin, line_fd);
+        if (pin == (uint32_t)g_lora.busy_gpio && value > 0) {
+            const uint64_t now_ms = get_monotonic_ms();
+            if (g_busy_high_since_ms == 0) g_busy_high_since_ms = now_ms;
+            if (now_ms - g_busy_high_since_ms >= RADIOLIB_BUSY_TIMEOUT_MS) {
+                g_lora.spi_transfer_failed = true;
+                g_lora.spi_error           = ETIMEDOUT;
+                snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "SX1262 BUSY remained high for %llu ms",
+                         static_cast<unsigned long long>(now_ms - g_busy_high_since_ms));
+                return 0;
+            }
+        } else if (pin == (uint32_t)g_lora.busy_gpio) {
+            g_busy_high_since_ms = 0;
+        }
         return value > 0 ? 1U : 0U;
     }
 
@@ -374,7 +474,7 @@ public:
     }
     void delay(RadioLibTime_t ms) override
     {
-        while (ms > 0 && !lora_stop_requested()) {
+        while (ms > 0 && !lora_hal_cancel_requested()) {
             const RadioLibTime_t slice = ms > 10 ? 10 : ms;
             usleep((useconds_t)(slice * 1000));
             ms -= slice;
@@ -382,7 +482,7 @@ public:
     }
     void delayMicroseconds(RadioLibTime_t us) override
     {
-        while (us > 0 && !lora_stop_requested()) {
+        while (us > 0 && !lora_hal_cancel_requested()) {
             const RadioLibTime_t slice = us > 10000 ? 10000 : us;
             usleep((useconds_t)slice);
             us -= slice;
@@ -400,11 +500,12 @@ public:
     }
     long pulseIn(uint32_t pin, uint32_t state, RadioLibTime_t timeout) override
     {
+        if (timeout > RADIOLIB_PULSE_TIMEOUT_US) timeout = RADIOLIB_PULSE_TIMEOUT_US;
         RadioLibTime_t start = micros();
-        while (micros() - start < timeout) {
+        while (micros() - start < timeout && !lora_hal_cancel_requested()) {
             if (digitalRead(pin) == state) {
                 RadioLibTime_t pulse_start = micros();
-                while (micros() - start < timeout && digitalRead(pin) == state) {
+                while (micros() - start < timeout && !lora_hal_cancel_requested() && digitalRead(pin) == state) {
                 }
                 return (long)(micros() - pulse_start);
             }
@@ -419,14 +520,27 @@ public:
     }
     void spiTransfer(uint8_t *out, size_t len, uint8_t *in) override
     {
-        if (lora_stop_requested()) {
+        if (lora_hal_cancel_requested()) {
+            // 0x20 is a deterministic, non-error SX126x command status.  It
+            // lets RadioLib unwind reset/findChip immediately after stop.
+            if (in) memset(in, 0x20, len);
+            return;
+        }
+        if (g_lora.spi_transfer_failed) {
             if (in) memset(in, 0, len);
             return;
         }
         uint8_t dummy[512] = {0};
+        if (len > sizeof(dummy)) {
+            if (in) memset(in, 0, len);
+            g_lora.spi_transfer_failed = true;
+            g_lora.spi_error           = EMSGSIZE;
+            snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "SPI transfer too large: %zu bytes", len);
+            return;
+        }
         uint8_t *tx        = out ? out : dummy;
         uint8_t *rx        = in ? in : dummy;
-        if (len > sizeof(dummy)) len = sizeof(dummy);
+        if (in) memset(in, 0, len);
         (void)lora_spi_transfer(tx, rx, len);
     }
     void spiEndTransaction() override
@@ -434,6 +548,10 @@ public:
     }
     void spiEnd() override
     {
+    }
+    void yield() override
+    {
+        if (!lora_hal_cancel_requested()) usleep(100);
     }
 };
 
@@ -482,6 +600,19 @@ static const char *lora_radiolib_status_text(int16_t state)
     }
 }
 
+static bool lora_radio_call_failed(const char *stage, int16_t state)
+{
+    if (g_lora.spi_transfer_failed) {
+        SLOGI("LoRa %s: SPI failed errno=%d(%s)", stage ? stage : "operation", g_lora.spi_error,
+              strerror(g_lora.spi_error));
+        return true;
+    }
+    if (state == RADIOLIB_ERR_NONE) return false;
+    snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "%s rc=%d(%s)", stage ? stage : "RadioLib", (int)state,
+             lora_radiolib_status_text(state));
+    return true;
+}
+
 static uint64_t lora_tx_timeout_for_payload(size_t payload_length)
 {
     const uint64_t airtime_us =
@@ -518,20 +649,26 @@ static bool lora_send_text_packet(const char *payload)
     snprintf(g_lora.last_tx, sizeof(g_lora.last_tx), "%s", payload);
     g_lora.has_sent_message    = true;
     g_lora.tx_done             = false;
+    g_lora.tx_event            = false;
     g_lora.rx_done             = false;
     g_lora.pending_rx_after_tx = true;
     g_lora.tx_mode             = false;
     g_lora.selected_tx_mode    = false;
-    (void)g_lora.radio->standby();
+    g_lora.clear_spi_error();
+    int16_t state = g_lora.radio->standby();
+    if (lora_radio_call_failed("standby before TX", state)) {
+        g_lora.pending_rx_after_tx = false;
+        return false;
+    }
     g_lora.tx_timeout_ms        = lora_tx_timeout_for_payload(payload_length);
-    int16_t state               = g_lora.radio->startTransmit((uint8_t *)g_lora.last_tx, payload_length);
-    if (state != RADIOLIB_ERR_NONE) {
+    state                       = g_lora.radio->startTransmit((uint8_t *)g_lora.last_tx, payload_length);
+    if (lora_radio_call_failed("startTransmit", state)) {
         g_lora.tx_in_progress      = false;
         g_lora.tx_start_ms         = 0;
         g_lora.pending_rx_after_tx = false;
         g_lora.tx_timeout_ms       = cp0_lora_runtime_policy::TX_TIMEOUT_MS;
         SLOGI("LoRa TX: startTransmit failed rc=%d(%s)", (int)state, lora_radiolib_status_text(state));
-        lora_start_receive_mode();
+        if (!g_lora.spi_transfer_failed) lora_start_receive_mode();
         return false;
     }
     g_lora.tx_in_progress = true;
@@ -551,8 +688,9 @@ static void lora_send_demo_packet(void)
     g_lora.rx_done              = false;
     const size_t payload_length = strlen(g_lora.last_tx);
     g_lora.tx_timeout_ms        = lora_tx_timeout_for_payload(payload_length);
+    g_lora.clear_spi_error();
     int16_t state               = g_lora.radio->startTransmit((uint8_t *)g_lora.last_tx, payload_length);
-    if (state != RADIOLIB_ERR_NONE) {
+    if (lora_radio_call_failed("demo startTransmit", state)) {
         g_lora.tx_in_progress = false;
         g_lora.tx_start_ms    = 0;
         g_lora.tx_timeout_ms  = cp0_lora_runtime_policy::TX_TIMEOUT_MS;
@@ -580,12 +718,10 @@ static void lora_start_receive_mode(void)
     g_lora.selected_tx_mode    = false;
     g_lora.pending_rx_after_tx = false;
     SLOGI("LoRa RX: startReceive()");
+    g_lora.clear_spi_error();
     int16_t state = g_lora.radio->startReceive();
     SLOGI("LoRa RX: startReceive rc=%d(%s)", (int)state, lora_radiolib_status_text(state));
-    if (state != RADIOLIB_ERR_NONE) {
-        snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "startReceive rc=%d(%s)", (int)state,
-                 lora_radiolib_status_text(state));
-    }
+    (void)lora_radio_call_failed("startReceive", state);
 }
 
 static void lora_apply_mode(bool tx_mode)
@@ -603,8 +739,9 @@ static void lora_apply_mode(bool tx_mode)
             SLOGI("LoRa mode: TX already in progress");
             return;
         }
+        g_lora.clear_spi_error();
         int16_t state = g_lora.radio->standby();
-        if (state == RADIOLIB_ERR_NONE) {
+        if (!lora_radio_call_failed("set TX standby", state)) {
             SLOGI("LoRa mode: TX ready");
         } else {
             SLOGI("LoRa mode: set TX failed rc=%d(%s)", (int)state, lora_radiolib_status_text(state));
@@ -625,6 +762,7 @@ static void lora_apply_mode(bool tx_mode)
 static void lora_service_irq_once(void)
 {
     if (!g_lora.initialized || g_lora.radio == NULL) return;
+    g_lora.clear_spi_error();
 
     bool irq_event = false;
     if (!g_lora.irq_poll_fallback && g_lora.irq_fd >= 0) {
@@ -650,6 +788,7 @@ static void lora_service_irq_once(void)
     }
 
     uint32_t irq_flags = g_lora.radio->getIrqFlags();
+    if (g_lora.spi_transfer_failed) return;
     if (irq_flags != RADIOLIB_SX126X_IRQ_NONE || irq_event) {
         SLOGI("LoRa IRQ: event=%d flags=0x%08lX tx_in_progress=%d tx_mode=%d", irq_event ? 1 : 0,
               (unsigned long)irq_flags, g_lora.tx_in_progress ? 1 : 0, g_lora.tx_mode ? 1 : 0);
@@ -659,7 +798,7 @@ static void lora_service_irq_once(void)
     if (g_lora.tx_in_progress) {
         if (irq_flags & RADIOLIB_SX126X_IRQ_TX_DONE) {
             int16_t state = g_lora.radio->finishTransmit();
-            if (state == RADIOLIB_ERR_NONE) {
+            if (!lora_radio_call_failed("finishTransmit", state)) {
                 g_lora.tx_done = true;
             } else {
                 g_lora.tx_in_progress = false;
@@ -684,12 +823,12 @@ static void lora_service_irq_once(void)
         uint8_t rx_buf[sizeof(g_lora.last_rx)] = {0};
         int16_t state                          = g_lora.radio->readData(rx_buf, sizeof(g_lora.last_rx) - 1);
         SLOGI("LoRa RX: readData rc=%d(%s)", (int)state, lora_radiolib_status_text(state));
-        if (state == RADIOLIB_ERR_NONE) {
+        if (!lora_radio_call_failed("readData", state)) {
             memcpy(g_lora.last_rx, rx_buf, sizeof(g_lora.last_rx));
             g_lora.last_rx[sizeof(g_lora.last_rx) - 1] = '\0';
             g_lora.last_rssi                           = g_lora.radio->getRSSI();
             g_lora.last_snr                            = g_lora.radio->getSNR();
-            g_lora.rx_done                             = true;
+            g_lora.rx_done                             = !g_lora.spi_transfer_failed;
             SLOGI("LoRa RX OK: '%s' RSSI=%.1f SNR=%.1f", g_lora.last_rx, g_lora.last_rssi, g_lora.last_snr);
         } else if (state != RADIOLIB_ERR_CRC_MISMATCH) {
             snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "readData rc=%d(%s)", (int)state,
@@ -773,11 +912,17 @@ static void lora_init_hardware(void)
     } else {
         lora_set_diag_step("i2c_scan", 1, cp0_lora_pi4io_controller::status());
     }
+    if (lora_stop_requested()) {
+        lora_release_hardware();
+        return;
+    }
 
     lora_set_diag_step("power_enable", 0, "start");
     if (!cp0_lora_hat_power_controller::enable(g_lora.power_gpio)) {
-        SLOGI("Status: GPIO5 low set failed");
-        lora_set_diag_step("power_enable", 1, "GPIO5 low set failed");
+        SLOGI("Status: ext_5v_out enable failed");
+        lora_set_diag_step("power_enable", 1, "ext_5v_out enable failed");
+        lora_release_hardware();
+        return;
     }
     usleep(100000);
     if (lora_stop_requested()) {
@@ -849,49 +994,69 @@ static void lora_init_hardware(void)
         return;
     }
 
-    lora_set_diag_step("radiolib_setup", 0, "create module");
-    g_lora.nss_manual   = false;
-    g_lora.radio_module = new Module(&g_lora_radio_hal, RADIOLIB_NC, (uint32_t)g_lora.irq_gpio,
-                                     (uint32_t)g_lora.rst_gpio, (uint32_t)g_lora.busy_gpio);
-    g_lora.radio        = new SX1262(g_lora.radio_module);
+    std::unique_ptr<Module> radio_module;
+    std::unique_ptr<SX1262> radio;
+    try {
+        lora_set_diag_step("radiolib_setup", 0, "create module");
+        g_lora.nss_manual = false;
+        radio_module = std::make_unique<Module>(&g_lora_radio_hal, RADIOLIB_NC, (uint32_t)g_lora.irq_gpio,
+                                                (uint32_t)g_lora.rst_gpio, (uint32_t)g_lora.busy_gpio);
+        radio_module->spiConfig.timeout = RADIOLIB_BUSY_TIMEOUT_MS;
+        radio = std::make_unique<SX1262>(radio_module.get());
 
-    if (g_lora.radio_module == NULL || g_lora.radio == NULL) {
-        g_lora.initialized = false;
-        g_lora.hw_ready    = false;
-        lora_set_diag_step("radiolib_setup", 1, "allocation failed");
+        lora_set_diag_step("radiolib_begin", 0, "configure sx1262 via RadioLib");
+        g_lora.clear_spi_error();
+        int16_t state = radio->begin(868.0f,  // frequency MHz
+                                     125.0f,  // bandwidth kHz
+                                     12,      // spreading factor
+                                     5,       // coding rate 4/5
+                                     0x34,    // sync word
+                                     22,      // output power dBm
+                                     20,      // preamble length
+                                     3.0f,    // TCXO voltage
+                                     false);
+
+        if (lora_stop_requested()) {
+            lora_quiesce_radio(radio.get());
+            lora_release_hardware();
+            return;
+        }
+
+        if (state != RADIOLIB_ERR_NONE || g_lora.spi_transfer_failed) {
+            if (!g_lora.spi_transfer_failed) {
+                snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "RadioLib begin rc=%d(%s)", (int)state,
+                         lora_radiolib_status_text(state));
+            }
+            SLOGI("LoRa init failed: rc=%d (%s), spi_error=%d", (int)state, lora_radiolib_status_text(state),
+                  g_lora.spi_error);
+            lora_set_diag_step("radiolib_begin", state, g_lora.last_diag);
+            lora_quiesce_radio(radio.get());
+            lora_release_hardware();
+            return;
+        }
+
+        const int16_t current_state = radio->setCurrentLimit(140);
+        const int16_t switch_state  = radio->setDio2AsRfSwitch(true);
+        if (current_state != RADIOLIB_ERR_NONE || switch_state != RADIOLIB_ERR_NONE ||
+            g_lora.spi_transfer_failed) {
+            if (!g_lora.spi_transfer_failed) {
+                snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "RadioLib final config current=%d switch=%d",
+                         (int)current_state, (int)switch_state);
+            }
+            lora_set_diag_step("radiolib_config", 1, g_lora.last_diag);
+            lora_quiesce_radio(radio.get());
+            lora_release_hardware();
+            return;
+        }
+    } catch (...) {
+        lora_quiesce_radio(radio.get());
+        lora_set_diag_step("radiolib_setup", 1, "allocation or RadioLib exception");
         lora_release_hardware();
         return;
     }
 
-    lora_set_diag_step("radiolib_begin", 0, "configure sx1262 via RadioLib");
-    int16_t state = g_lora.radio->begin(868.0f,  // frequency MHz
-                                        125.0f,  // bandwidth kHz
-                                        12,      // spreading factor
-                                        5,       // coding rate 4/5
-                                        0x34,    // sync word
-                                        22,      // output power dBm
-                                        20,      // preamble length
-                                        3.0f,    // TCXO voltage
-                                        false);
-
-    if (lora_stop_requested()) {
-        lora_release_hardware();
-        return;
-    }
-
-    if (state != RADIOLIB_ERR_NONE) {
-        g_lora.initialized = false;
-        g_lora.hw_ready    = false;
-        snprintf(g_lora.last_diag, sizeof(g_lora.last_diag), "RadioLib begin rc=%d(%s)", (int)state,
-                 lora_radiolib_status_text(state));
-        SLOGI("LoRa init failed: rc=%d (%s)", (int)state, lora_radiolib_status_text(state));
-        lora_set_diag_step("radiolib_begin", state, g_lora.last_diag);
-        lora_release_hardware();
-        return;
-    }
-
-    (void)g_lora.radio->setCurrentLimit(140);
-    (void)g_lora.radio->setDio2AsRfSwitch(true);
+    g_lora.radio_module = radio_module.release();
+    g_lora.radio        = radio.release();
 
     g_lora.initialized         = true;
     g_lora.hw_ready            = true;
@@ -956,10 +1121,12 @@ bool initialize()
 void request_stop() noexcept
 {
     g_stop_requested.store(true, std::memory_order_release);
+    cp0_lora_pi4io_controller::request_stop();
 }
 
 void clear_stop() noexcept
 {
+    cp0_lora_pi4io_controller::clear_stop();
     g_stop_requested.store(false, std::memory_order_release);
 }
 

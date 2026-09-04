@@ -81,12 +81,13 @@ match the CardputerZero Cap wiring):
 | `LORA_RST_CHIP`, `LORA_RST_OFFSET` | GPIO chip and line for SX1262 reset |
 | `LORA_BUSY_CHIP`, `LORA_BUSY_OFFSET` | GPIO chip and line for SX1262 BUSY |
 | `LORA_IRQ_CHIP`, `LORA_IRQ_OFFSET` | GPIO chip and line for SX1262 IRQ |
-| `HAT_5VOUT_CHIP`, `HAT_5VOUT_OFFSET` | I2C GPIO chip and line used to enable Cap 5V power |
+| `HAT_5VOUT_CHIP`, `HAT_5VOUT_OFFSET` | Explicit legacy active-low GPIO override; both values must be set |
 
-The Debian package launches the hardware app as root through a non-interactive,
-command-specific sudo rule for members of the `gpio` group. The rule permits
-only the installed binary with no command arguments. This is currently needed
-for `ext_5v_out`; UART access alone normally works for members of `dialout`.
+The Debian package launches the app as the APPLaunch user. That user must be a
+member of the `video`, `input`, `gpio`, `spi`, and `i2c` groups, as configured
+by the CardputerZero image. A package udev rule grants the `gpio` group write
+access only to `ext_5v_out/brightness`; the UI and radio protocol code do not
+run as root.
 
 Radio initialization errors and SPI/GPIO diagnostics are shown in the app.
 
