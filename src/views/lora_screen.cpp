@@ -51,7 +51,8 @@ static bool is_menu_next_key(uint32_t key)
 
 namespace {
 
-void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitializationState> &state) noexcept
+void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitializationState> &state,
+                             cap_lora::CapLoRa1262* device) noexcept
 {
     int init_code    = -1;
     int info_code    = -1;
@@ -61,12 +62,12 @@ void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitiali
     try {
         const auto cancelled = [&] { return state->stop_requested.load(std::memory_order_acquire); };
         if (!cancelled()) {
-            init_code = cap_lora::backend::initialize() ? 0 : -1;
+            init_code = device && device->initialize() ? 0 : -1;
             if (!cancelled()) {
-                cap_lora::backend::get_info(&info, false);
+                if (device) device->get_info(&info, false);
                 info_code = 0;
                 if (!cancelled() && init_code == 0 && info.hw_ready) {
-                    cap_lora::backend::start_receive();
+                    device->start_receive();
                     receive_code = 0;
                 }
             }
@@ -98,6 +99,7 @@ void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitiali
 
 LoraScreen::LoraScreen()
 {
+    lora_device_ = std::make_unique<cap_lora::CapLoRa1262>();
 }
 
 LoraScreen::~LoraScreen()
@@ -116,6 +118,9 @@ void LoraScreen::onEnter(lv_obj_t* parent)
 
 void LoraScreen::onExit()
 {
+    if (!app_active_ && !poll_timer_ && !initialization_state_ &&
+        !init_thread_.joinable() && !page_root_)
+        return;
     cancel_view_animations();
     cancel_message_title_animation();
     app_active_ = false;
@@ -124,11 +129,12 @@ void LoraScreen::onExit()
     // shared state, so it can safely observe this flag while the page is being
     // destroyed and will not start another hardware phase after cancellation.
     if (initialization_state_) initialization_state_->stop_requested.store(true, std::memory_order_release);
-    cap_lora::backend::request_stop();
+    if (lora_device_) lora_device_->request_stop();
     if (init_thread_.joinable()) init_thread_.join();
-    cap_lora::backend::shutdown();
+    if (lora_device_) lora_device_->shutdown();
     initialization_state_.reset();
     initialization_pending_ = false;
+    pending_tx_text_.clear();
     detach_delete_callbacks();
     if (page_root_) lv_obj_delete(page_root_);
     page_root_ = nullptr;
@@ -176,13 +182,15 @@ void LoraScreen::start_lora_initialization()
     // backend hardware state.
     if (initialization_state_) initialization_state_->stop_requested.store(true, std::memory_order_release);
     if (init_thread_.joinable()) init_thread_.join();
-    cap_lora::backend::clear_stop();
+    if (lora_device_) lora_device_->clear_stop();
 
     initialization_pending_ = true;
     initialization_state_   = std::make_shared<lora_app_detail::LoraInitializationState>();
     const auto state        = initialization_state_;
     try {
-        init_thread_ = std::thread([state] { run_lora_initialization(state); });
+        init_thread_ = std::thread([state, device = lora_device_.get()] {
+            run_lora_initialization(state, device);
+        });
     } catch (...) {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->init_code    = -1;
@@ -224,12 +232,14 @@ bool LoraScreen::consume_lora_initialization()
 
 bool LoraScreen::refresh_lora_info(bool poll)
 {
-    if (poll) cap_lora::backend::poll();
-    cap_lora::backend::get_info(&lora_info_, poll);
+    if (!lora_device_) return false;
+    if (poll) lora_device_->exec_poll();
+    lora_device_->get_info(&lora_info_, poll);
     return true;
 }
 
-void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr)
+void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr,
+                                     LoraMessageDelivery delivery)
 {
     if (!message_list_) return;
     // A new bubble should never sit underneath the temporary Messages HUD.
@@ -241,7 +251,7 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         lv_obj_t *oldest_row = lv_obj_get_child(message_list_, 0);
         if (oldest_row) lv_obj_delete(oldest_row);
     }
-    model_.append_message(text ? text : "", outgoing, rssi, snr);
+    model_.append_message(text ? text : "", outgoing, rssi, snr, delivery);
     last_message_row_ = append_message_row(model_.messages().back());
     set_visible(empty_message_label_, false);
     set_visible(empty_message_hint_label_, false);
@@ -249,6 +259,38 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         scroll_to_latest(LV_ANIM_ON);
     else
         scroll_to_latest_pending_ = true;
+}
+
+void LoraScreen::rebuild_message_list()
+{
+    if (!message_list_) return;
+    lv_obj_clean(message_list_);
+    last_message_row_ = nullptr;
+    for (const auto &message : model_.messages()) last_message_row_ = append_message_row(message);
+    const bool empty = model_.messages().empty();
+    set_visible(empty_message_label_, empty);
+    set_visible(empty_message_hint_label_, empty);
+    // Rebuilding clears and recreates every row, which resets the scroll
+    // position to the top. Do not animate that internal repositioning: an
+    // animated rebuild makes the whole history visibly slide from the first
+    // message to the latest one after a send status update.
+    if (!empty) scroll_to_latest(LV_ANIM_OFF);
+}
+
+void LoraScreen::settle_pending_transmit()
+{
+    if (pending_tx_text_.empty()) return;
+    bool completed = false;
+    bool sent      = false;
+    if (lora_info_.tx_event && std::strcmp(lora_info_.last_tx, pending_tx_text_.c_str()) == 0) {
+        completed = true;
+        sent      = true;
+    } else if (!lora_info_.tx_in_progress) {
+        completed = true;
+    }
+    if (!completed) return;
+    if (model_.resolve_latest_pending(sent)) rebuild_message_list();
+    pending_tx_text_.clear();
 }
 
 void LoraScreen::open_send_view(uint32_t first_key)
@@ -323,8 +365,9 @@ bool LoraScreen::handle_key(uint32_t key)
 {
     if (model_.view() == LoraView::SEND) return handle_send_key(key);
     if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
-        onExit();
-        return true;
+        // LoraApp converts an unhandled exit key into a quit request. Avoid
+        // joining the initialization worker from inside an input callback.
+        return false;
     }
     return handle_navigation_key(key);
 }
@@ -352,10 +395,12 @@ void LoraScreen::send_current_text()
         return;
     }
     std::string sent_text(model_.tx_input());
-    if (cap_lora::backend::send_text(sent_text.c_str())) {
-        refresh_lora_info(false);
-        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f);
+    if (lora_device_ && lora_device_->exec_send(sent_text.c_str())) {
+        pending_tx_text_ = sent_text;
+        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, LoraMessageDelivery::PENDING);
         model_.complete_send();
+        refresh_lora_info(false);
+        settle_pending_transmit();
         render_current_view();
     } else {
         model_.set_send_status("Send failed");
@@ -381,6 +426,7 @@ void LoraScreen::on_poll_timer()
         return;
     }
     if (!refresh_lora_info(true)) return;
+    settle_pending_transmit();
     if (lora_info_.rx_event) append_chat_message(lora_info_.last_rx, false, lora_info_.rssi, lora_info_.snr);
     if (model_.view() == LoraView::INFO) update_info_content();
 }

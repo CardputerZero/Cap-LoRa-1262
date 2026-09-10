@@ -53,14 +53,18 @@ bool LoraApp::onLvglKeyState(uint32_t key, const char* utf8, bool pressed)
             (void)utf8;
         }
         const bool handled = screen_.handleKey(key);
-        if (key == LV_KEY_ESC && !screen_.active()) quit_requested_ = true;
+        // Exit keys from the normal views are deliberately left unhandled by
+        // LoraScreen. Only set the flag here; the main loop owns teardown and
+        // establishes the shutdown deadline first. In the send view ESC and
+        // Backspace remain handled locally as cancel/edit commands.
+        if (!handled && (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL))
+            quit_requested_ = true;
         return handled;
     } catch (...) {
         // Keyboard callbacks run from both the evdev poll path and LVGL's SDL
         // event path. Do not let an unexpected UI exception unwind into either
-        // loop; tear down the page and let main perform the regular shutdown.
+        // loop; let main perform the regular, deadline-protected shutdown.
         quit_requested_ = true;
-        screen_.onExit();
         return true;
     }
 }

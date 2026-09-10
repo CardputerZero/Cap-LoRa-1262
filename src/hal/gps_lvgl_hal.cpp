@@ -19,6 +19,8 @@ namespace cap_gps {
 namespace {
 
 std::atomic_bool g_quit_requested{false};
+lv_display_t* g_display = nullptr;
+bool g_hal_initialized   = false;
 
 const char* envOrDefault(const char* name, const char* fallback)
 {
@@ -30,6 +32,9 @@ const char* envOrDefault(const char* name, const char* fallback)
 SDL_EventFilter g_previous_event_filter = nullptr;
 void* g_previous_event_filter_data      = nullptr;
 Uint32 g_window_id                      = 0;
+lv_indev_t* g_mouse                     = nullptr;
+lv_indev_t* g_keyboard                  = nullptr;
+bool g_event_filter_installed           = false;
 
 int SDLCALL filterSdlEvent(void* userData, SDL_Event* event)
 {
@@ -60,11 +65,17 @@ float envFloatOrDefault(const char* name, float fallback)
 
 bool initLvglHal(int32_t width, int32_t height)
 {
+    if (g_hal_initialized) {
+        spdlog::error("Cap-LoRa-1262 HAL: already initialized");
+        return false;
+    }
     g_quit_requested.store(false, std::memory_order_release);
 #if LV_USE_SDL
     lv_display_t* disp = lv_sdl_window_create(width, height);
     if (!disp) {
         spdlog::error("Cap-LoRa-1262 HAL: failed to create SDL display");
+        lv_sdl_quit();
+        lv_deinit();
         return false;
     }
 
@@ -73,17 +84,32 @@ bool initLvglHal(int32_t width, int32_t height)
     lv_sdl_window_set_zoom(disp, zoom);
     lv_sdl_window_set_title(disp, envOrDefault("LV_SDL_WINDOW_TITLE", "Cap-LoRa-1262"));
     spdlog::info("Cap-LoRa-1262 HAL: SDL logical display {}x{}, zoom {}", width, height, zoom);
-    lv_sdl_mouse_create();
-    if (!lv_sdl_keyboard_create()) {
-        spdlog::error("Cap-LoRa-1262 HAL: failed to create SDL keyboard input");
+    lv_indev_t* mouse = lv_sdl_mouse_create();
+    if (!mouse) {
+        spdlog::error("Cap-LoRa-1262 HAL: failed to create SDL mouse input");
         lv_display_delete(disp);
         lv_sdl_quit();
+        lv_deinit();
+        return false;
+    }
+    lv_indev_t* keyboard = lv_sdl_keyboard_create();
+    if (!keyboard) {
+        spdlog::error("Cap-LoRa-1262 HAL: failed to create SDL keyboard input");
+        lv_indev_delete(mouse);
+        lv_display_delete(disp);
+        lv_sdl_quit();
+        lv_deinit();
         return false;
     }
 
     g_window_id = SDL_GetWindowID(lv_sdl_window_get_window(disp));
     SDL_GetEventFilter(&g_previous_event_filter, &g_previous_event_filter_data);
     SDL_SetEventFilter(filterSdlEvent, nullptr);
+    g_event_filter_installed = true;
+    g_display                = disp;
+    g_mouse                  = mouse;
+    g_keyboard               = keyboard;
+    g_hal_initialized        = true;
     return true;
 #elif LV_USE_LINUX_FBDEV
     (void)width;
@@ -101,6 +127,8 @@ bool initLvglHal(int32_t width, int32_t height)
         lv_deinit();
         return false;
     }
+    g_display         = disp;
+    g_hal_initialized = true;
     return true;
 #else
     spdlog::error("Cap-LoRa-1262 HAL: no LVGL display driver enabled");
@@ -115,18 +143,30 @@ bool lvglHalQuitRequested() noexcept
 
 void shutdownLvglHal()
 {
+    if (!g_hal_initialized) return;
 #if LV_USE_SDL
-    SDL_SetEventFilter(g_previous_event_filter, g_previous_event_filter_data);
+    if (g_event_filter_installed) {
+        SDL_SetEventFilter(g_previous_event_filter, g_previous_event_filter_data);
+    }
     g_previous_event_filter      = nullptr;
     g_previous_event_filter_data = nullptr;
+    g_event_filter_installed     = false;
     g_window_id                  = 0;
+    if (g_keyboard) lv_indev_delete(g_keyboard);
+    if (g_mouse) lv_indev_delete(g_mouse);
+    g_keyboard = nullptr;
+    g_mouse    = nullptr;
+    if (g_display) lv_display_delete(g_display);
+    g_display = nullptr;
     lv_sdl_quit();
+    lv_deinit();
 #elif LV_USE_LINUX_FBDEV
-    if (lv_display_t* display = lv_display_get_default()) {
-        lv_display_delete(display);
-    }
+    if (g_display) lv_display_delete(g_display);
+    g_display = nullptr;
     lv_deinit();
 #endif
+    g_hal_initialized = false;
+    g_quit_requested.store(false, std::memory_order_release);
 }
 
 }  // namespace cap_gps

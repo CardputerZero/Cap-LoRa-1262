@@ -89,7 +89,8 @@ validated_sha256=""
 if [[ -f "${ARCHIVE_VALIDATION_STAMP}" ]]; then
     validated_sha256="$(<"${ARCHIVE_VALIDATION_STAMP}")"
 fi
-if [[ -n "${validated_sha256}" && "${ARCHIVE}" -ot "${ARCHIVE_VALIDATION_STAMP}" ]]; then
+if [[ -n "${validated_sha256}" && "${ARCHIVE}" -ot "${ARCHIVE_VALIDATION_STAMP}" && \
+      ( -z "${BSP_SHA256}" || "${validated_sha256}" == "${BSP_SHA256}" ) ]]; then
     archive_sha256="${validated_sha256}"
 else
     archive_sha256="$(sha256sum "${ARCHIVE}")"

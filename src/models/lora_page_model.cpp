@@ -48,9 +48,20 @@ void LoraPageModel::complete_send()
     send_status_.clear();
 }
 
-void LoraPageModel::append_message(std::string text, bool outgoing, float rssi, float snr)
+void LoraPageModel::append_message(std::string text, bool outgoing, float rssi, float snr,
+                                   LoraMessageDelivery delivery)
 {
     if (text.empty()) text = "<empty>";
     if (messages_.size() >= MESSAGE_HISTORY_LIMIT) messages_.pop_front();
-    messages_.push_back({std::move(text), outgoing, rssi, snr});
+    messages_.push_back({std::move(text), outgoing, rssi, snr, delivery});
+}
+
+bool LoraPageModel::resolve_latest_pending(bool sent)
+{
+    for (auto message = messages_.rbegin(); message != messages_.rend(); ++message) {
+        if (!message->outgoing || message->delivery != LoraMessageDelivery::PENDING) continue;
+        message->delivery = sent ? LoraMessageDelivery::SENT : LoraMessageDelivery::FAILED;
+        return true;
+    }
+    return false;
 }

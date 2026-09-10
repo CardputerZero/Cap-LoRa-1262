@@ -156,7 +156,14 @@ bool GpsKeypad::openDevice(const std::string& path, bool require_app_keys)
         return false;
     }
 
-    const bool grab_input = envEnabled("CAP_LORA_KEYBOARD_GRAB", false);
+    const bool grab_requested = envEnabled("CAP_LORA_KEYBOARD_GRAB", false);
+    // APPLaunch reads this same evdev node to detect the exit gesture and send
+    // the termination signals. An exclusive grab would disable that watchdog.
+    const bool app_launch_managed = std::getenv("APPLAUNCH_LINUX_KEYBOARD_DEVICE") != nullptr;
+    const bool grab_input        = grab_requested && !app_launch_managed;
+    if (grab_requested && app_launch_managed) {
+        spdlog::warn("GpsKeypad: ignoring CAP_LORA_KEYBOARD_GRAB under APPLaunch supervision");
+    }
     if (grab_input && ::ioctl(fd, EVIOCGRAB, 1) < 0) {
         spdlog::warn("GpsKeypad: failed to grab {}: {}", path, std::strerror(errno));
         ::close(fd);
@@ -185,6 +192,9 @@ void GpsKeypad::close()
 #endif
     _event_fds.clear();
     _pending_keys.clear();
+    _last_key            = 0;
+    _left_shift_pressed  = false;
+    _right_shift_pressed = false;
 
     if (_indev) {
         lv_indev_delete(_indev);

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 export LC_ALL=C
+umask 022
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -32,8 +33,8 @@ die() {
 if [[ ! "${PACKAGE_NAME}" =~ ^[a-z0-9][a-z0-9+.-]*$ ]]; then
     die "Invalid Debian package name: ${PACKAGE_NAME}"
 fi
-if [[ ! "${PACKAGE_SUFFIX}" =~ ^[A-Za-z0-9][A-Za-z0-9._+-]*$ ]]; then
-    die "Invalid package filename suffix: ${PACKAGE_SUFFIX}"
+if [[ ! "${PACKAGE_SUFFIX}" =~ ^[A-Za-z0-9][A-Za-z0-9.+~-]*$ ]]; then
+    die "Invalid Debian package revision: ${PACKAGE_SUFFIX}"
 fi
 if [[ "${MAINTAINER}" == *$'\n'* || "${MAINTAINER}" == *$'\r'* ]]; then
     die "MAINTAINER must not contain newlines"
@@ -42,40 +43,29 @@ fi
 validate_output_path() {
     local path="$1"
     local label="$2"
-    local resolved root
+    local allowed_root="$3"
+    local resolved allowed
 
     [[ -n "${path}" ]] || die "${label} path must not be empty."
     resolved="$(realpath -m -- "${path}")"
-    root="$(realpath -m -- "${ROOT_DIR}")"
+    allowed="$(realpath -m -- "${allowed_root}")"
     case "${resolved}" in
-        /|/tmp|/usr|/var|/home|/root|"${root}")
-            die "Refusing unsafe ${label} path: ${path}"
-            ;;
-    esac
-    case "${root}/" in
-        "${resolved}"/*)
-            die "Refusing an ancestor of the source tree as ${label}: ${path}"
-            ;;
+        "${allowed}"|"${allowed}"/*) ;;
+        *) die "${label} path must be inside ${allowed}: ${path}" ;;
     esac
 }
 
 safe_remove_tree() {
     local path="$1"
     local label="$2"
-    local resolved root
+    local resolved allowed
 
     [[ -n "${path}" ]] || die "Refusing to remove an empty ${label} path."
     resolved="$(realpath -m -- "${path}")"
-    root="$(realpath -m -- "${ROOT_DIR}")"
+    allowed="$(realpath -m -- "${ROOT_DIR}/build")"
     case "${resolved}" in
-        /|/tmp|/usr|/var|/home|/root|"${root}")
-            die "Refusing to remove unsafe ${label} path: ${path}"
-            ;;
-    esac
-    case "${root}/" in
-        "${resolved}"/*)
-            die "Refusing to remove an ancestor of the source tree: ${path}"
-            ;;
+        "${allowed}"/*) ;;
+        *) die "Refusing to remove ${label} outside ${allowed}: ${path}" ;;
     esac
     rm -rf -- "${path}"
 }
@@ -104,6 +94,11 @@ read_cmake_cache_value() {
     printf "%s\n" "${line#*=}"
 }
 
+require_command realpath
+validate_output_path "${BUILD_DIR}" "build" "${ROOT_DIR}/build"
+validate_output_path "${STAGE_DIR}" "staging" "${ROOT_DIR}/build"
+validate_output_path "${DIST_DIR}" "distribution" "${ROOT_DIR}/dist"
+
 CMAKE_CONFIGURE_ARGS=(
     -S "${ROOT_DIR}"
     -B "${BUILD_DIR}"
@@ -131,13 +126,9 @@ if [[ "${CAP_LORA_FORCE_CROSS}" == "1" || ("${host_arch}" != "aarch64" && "${hos
     CMAKE_CONFIGURE_ARGS+=(-DCMAKE_SYSROOT="${CAP_LORA_SYSROOT}")
 fi
 
-for command in "${CMAKE_BIN}" "${READELF_BIN}" dpkg-deb realpath; do
+for command in "${CMAKE_BIN}" "${READELF_BIN}" dpkg-deb; do
     require_command "${command}"
 done
-
-validate_output_path "${BUILD_DIR}" "build"
-validate_output_path "${STAGE_DIR}" "staging"
-validate_output_path "${DIST_DIR}" "distribution"
 
 "${CMAKE_BIN}" "${CMAKE_CONFIGURE_ARGS[@]}"
 if [[ "$(read_cmake_cache_value CAP_LORA_USE_SDL)" != "OFF" ]]; then
@@ -149,16 +140,27 @@ if [[ -z "${PACKAGE_VERSION}" || "${PACKAGE_VERSION}" == *$'\n'* || \
       "${PACKAGE_VERSION}" == *$'\r'* || "${PACKAGE_VERSION}" == */* ]]; then
     die "Invalid Debian package version: ${PACKAGE_VERSION}"
 fi
+DEBIAN_VERSION="${PACKAGE_VERSION}-${PACKAGE_SUFFIX}"
 "${CMAKE_BIN}" --build "${BUILD_DIR}" -j"${PARALLEL}"
 
 EXECUTABLE="${BUILD_DIR}/dist/${BIN_NAME}"
 DESKTOP_TEMPLATE="${SCRIPT_DIR}/cap-lora-1262.desktop.in"
-SUDOERS_FILE="${SCRIPT_DIR}/m5cardputerzero-cap-lora-1262.sudoers"
+UDEV_RULES_FILE="${SCRIPT_DIR}/70-cap-lora-1262.rules"
 ICON_FILE="${SCRIPT_DIR}/images/cap-lora-1262.png"
 LICENSE_FILE="${ROOT_DIR}/LICENSE"
 THIRD_PARTY_NOTICES_FILE="${ROOT_DIR}/THIRD_PARTY_NOTICES.md"
-for path in "${EXECUTABLE}" "${DESKTOP_TEMPLATE}" "${SUDOERS_FILE}" "${ICON_FILE}" "${LICENSE_FILE}" \
-    "${THIRD_PARTY_NOTICES_FILE}"; do
+LVGL_LICENSE_FILE="${ROOT_DIR}/dependencies/lvgl/LICENCE.txt"
+LODEPNG_LICENSE_FILE="${ROOT_DIR}/dependencies/lvgl/src/libs/lodepng/LICENSE.txt"
+MONTSERRAT_LICENSE_FILE="${ROOT_DIR}/dependencies/lvgl/scripts/built_in_font/font_license/Montserrat/OFL.txt"
+SPDLOG_LICENSE_FILE="${ROOT_DIR}/dependencies/spdlog/LICENSE"
+SMOOTH_UI_LICENSE_FILE="${ROOT_DIR}/dependencies/smooth_ui_toolkit/LICENSE"
+RADIOLIB_LICENSE_FILE="${ROOT_DIR}/dependencies/RadioLib/license.txt"
+PIGWEED_LICENSE_FILE="${ROOT_DIR}/dependencies/pigweed/LICENSE"
+FUCHSIA_STDCOMPAT_LICENSE_FILE="${ROOT_DIR}/dependencies/pigweed/third_party/fuchsia/repo/LICENSE"
+for path in "${EXECUTABLE}" "${DESKTOP_TEMPLATE}" "${UDEV_RULES_FILE}" "${ICON_FILE}" "${LICENSE_FILE}" \
+    "${THIRD_PARTY_NOTICES_FILE}" "${LVGL_LICENSE_FILE}" "${LODEPNG_LICENSE_FILE}" \
+    "${MONTSERRAT_LICENSE_FILE}" "${SPDLOG_LICENSE_FILE}" "${SMOOTH_UI_LICENSE_FILE}" \
+    "${RADIOLIB_LICENSE_FILE}" "${PIGWEED_LICENSE_FILE}" "${FUCHSIA_STDCOMPAT_LICENSE_FILE}"; do
     if [[ ! -f "${path}" ]]; then
         echo "Required file not found: ${path}" >&2
         exit 1
@@ -180,23 +182,17 @@ fi
 safe_remove_tree "${STAGE_DIR}" "Debian staging"
 INSTALL_EXEC_PATH="${INSTALL_ROOT}/bin/${BIN_NAME}"
 INSTALL_ICON_PATH="${LAUNCHER_ROOT}/share/images/cap-lora-1262.png"
-mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/etc/sudoers.d" \
+mkdir -p "${STAGE_DIR}/DEBIAN" "${STAGE_DIR}/usr/lib/udev/rules.d" \
     "${STAGE_DIR}${INSTALL_ROOT}/bin" \
     "${STAGE_DIR}${LAUNCHER_ROOT}/applications" \
     "${STAGE_DIR}${LAUNCHER_ROOT}/share/images" \
-    "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}" "${DIST_DIR}"
+    "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses" "${DIST_DIR}"
 install -m 755 "${EXECUTABLE}" "${DIST_DIR}/${BIN_NAME}"
 install -m 755 "${EXECUTABLE}" "${STAGE_DIR}${INSTALL_EXEC_PATH}"
 sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" \
     "${DESKTOP_TEMPLATE}" >"${STAGE_DIR}${LAUNCHER_ROOT}/applications/cap-lora-1262.desktop"
-sed -e "s|@CAP_LORA_EXEC_PATH@|${INSTALL_EXEC_PATH}|g" "${SUDOERS_FILE}" \
-    >"${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
-chmod 440 "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
+install -m 644 "${UDEV_RULES_FILE}" "${STAGE_DIR}/usr/lib/udev/rules.d/70-cap-lora-1262.rules"
 install -m 644 "${ICON_FILE}" "${STAGE_DIR}${INSTALL_ICON_PATH}"
-
-if command -v visudo >/dev/null 2>&1; then
-    visudo -c -f "${STAGE_DIR}/etc/sudoers.d/m5cardputerzero-cap-lora-1262"
-fi
 
 # Older package revisions placed the executable directly in APPLaunch and the
 # icon below the standalone resource root. Dpkg does not remove ordinary files
@@ -209,23 +205,51 @@ set -eu
 if [ "\${1:-}" = configure ]; then
     rm -f /usr/share/APPLaunch/bin/${BIN_NAME}
     rm -f /usr/share/Cap-LoRa-1262/share/images/cap-lora-1262.png
+    rm -f /etc/sudoers.d/m5cardputerzero-cap-lora-1262
+    if [ -e /sys/class/leds/ext_5v_out/brightness ]; then
+        chgrp gpio /sys/class/leds/ext_5v_out/brightness || true
+        chmod g+w /sys/class/leds/ext_5v_out/brightness || true
+    fi
+    udevadm control --reload-rules >/dev/null 2>&1 || true
 fi
 exit 0
 EOF
 chmod 755 "${STAGE_DIR}/DEBIAN/postinst"
+cat >"${STAGE_DIR}/DEBIAN/postrm" <<'EOF'
+#!/bin/sh
+set -eu
+if [ "${1:-}" = remove ] || [ "${1:-}" = purge ]; then
+    # The node is shared with other CardputerZero applications and the BSP
+    # already defines its root:gpio 0664 policy. Never revoke that policy when
+    # only this application is removed.
+    udevadm control --reload-rules >/dev/null 2>&1 || true
+fi
+exit 0
+EOF
+chmod 755 "${STAGE_DIR}/DEBIAN/postrm"
 install -m 644 "${LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/LICENSE"
 install -m 644 "${THIRD_PARTY_NOTICES_FILE}" \
     "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/THIRD_PARTY_NOTICES.md"
+install -m 644 "${LVGL_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/LVGL.txt"
+install -m 644 "${LODEPNG_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/LodePNG.txt"
+install -m 644 "${MONTSERRAT_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/Montserrat-OFL.txt"
+install -m 644 "${SPDLOG_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/spdlog.txt"
+install -m 644 "${SMOOTH_UI_LICENSE_FILE}" \
+    "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/smooth_ui_toolkit.txt"
+install -m 644 "${RADIOLIB_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/RadioLib.txt"
+install -m 644 "${PIGWEED_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/pigweed.txt"
+install -m 644 "${FUCHSIA_STDCOMPAT_LICENSE_FILE}" \
+    "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/fuchsia-stdcompat.txt"
 
 INSTALLED_SIZE="$(du -sk "${STAGE_DIR}/usr" | awk '{print $1}')"
 cat >"${STAGE_DIR}/DEBIAN/control" <<EOF
 Package: ${PACKAGE_NAME}
-Version: ${PACKAGE_VERSION}
+Version: ${DEBIAN_VERSION}
 Section: utils
 Priority: optional
 Architecture: ${DEB_ARCH}
 Maintainer: ${MAINTAINER}
-Depends: libc6, libstdc++6, libgcc-s1, sudo
+Depends: libc6, libstdc++6, libgcc-s1, udev
 Installed-Size: ${INSTALLED_SIZE}
 Description: Cap LoRa-1262 application for M5CardputerZero
  LoRa SX1262 text messaging and radio diagnostics for the Cap LoRa-1262 accessory.

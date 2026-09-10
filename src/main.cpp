@@ -13,17 +13,16 @@
 
 namespace {
 
-#if !LV_USE_SDL
-constexpr unsigned int kShutdownTimeoutSeconds = 3;
-#endif
+// APPLaunch sends SIGKILL after a three-second grace period. Keep our own
+// deadline shorter so cleanup cannot consume the launcher's entire window.
+constexpr unsigned int kShutdownTimeoutSeconds = 2;
 volatile std::sig_atomic_t g_signal_exit_requested = 0;
 
 void requestExitFromSignal(int signal)
 {
+    if (g_signal_exit_requested != 0) return;
     g_signal_exit_requested = signal;
-#if !LV_USE_SDL
     alarm(kShutdownTimeoutSeconds);
-#endif
 }
 
 void forceExitAfterShutdownTimeout(int)
@@ -39,6 +38,8 @@ void installSignalHandlers()
     struct sigaction action {};
     action.sa_handler = requestExitFromSignal;
     sigemptyset(&action.sa_mask);
+    sigaddset(&action.sa_mask, SIGINT);
+    sigaddset(&action.sa_mask, SIGTERM);
     sigaction(SIGINT, &action, nullptr);
     sigaction(SIGTERM, &action, nullptr);
 
@@ -73,50 +74,54 @@ int main()
     smooth_ui_toolkit::ui_hal::on_get_tick([]() { return lv_tick_get(); });
     smooth_ui_toolkit::ui_hal::on_delay([](uint32_t milliseconds) { usleep(milliseconds * 1000); });
 
-    cap_lora::LoraApp app;
+    const int run_result = [&]() -> int {
+        cap_lora::LoraApp app;
 
 #if !LV_USE_SDL
-    cap_gps::GpsKeypad keypad;
-    keypad.setKeyCallback(
-        [&app](uint32_t key, const char* utf8, bool pressed) { return app.onLvglKeyState(key, utf8, pressed); });
-    if (!keypad.openDefault()) {
-        spdlog::error("Cap-LoRa-1262: no usable keyboard input device; aborting startup");
+        cap_gps::GpsKeypad keypad;
+        keypad.setKeyCallback(
+            [&app](uint32_t key, const char* utf8, bool pressed) { return app.onLvglKeyState(key, utf8, pressed); });
+        if (!keypad.openDefault()) {
+            spdlog::error("Cap-LoRa-1262: no usable keyboard input device; aborting startup");
+            keypad.close();
+            cap_gps::shutdownLvglHal();
+            return 1;
+        }
+#endif
+
+        app.start();
+        lv_obj_invalidate(lv_screen_active());
+        while (!app.quitRequested() && !cap_gps::lvglHalQuitRequested() && g_signal_exit_requested == 0) {
+#if !LV_USE_SDL
+            keypad.poll();
+            if (app.quitRequested() || g_signal_exit_requested != 0) {
+                break;
+            }
+#endif
+            lv_timer_handler();
+            if (cap_gps::lvglHalQuitRequested() || g_signal_exit_requested != 0) {
+                break;
+            }
+            app.tick(lv_tick_get());
+            usleep(10000);
+        }
+
+        spdlog::info("Cap-LoRa-1262: exit requested (app={}, display={}, signal={})", app.quitRequested(),
+                     cap_gps::lvglHalQuitRequested(), static_cast<int>(g_signal_exit_requested));
+        // A signal handler has already started the deadline. Do not move that
+        // deadline later; only arm it for exits requested by the UI.
+        if (g_signal_exit_requested == 0) alarm(kShutdownTimeoutSeconds);
+        app.stop();
+#if !LV_USE_SDL
         keypad.close();
+#endif
         cap_gps::shutdownLvglHal();
-        return 1;
-    }
-#endif
+        return 0;
+    }();
+    if (run_result != 0) return run_result;
 
-    app.start();
-    lv_obj_invalidate(lv_screen_active());
-    while (!app.quitRequested() && !cap_gps::lvglHalQuitRequested() && g_signal_exit_requested == 0) {
-#if !LV_USE_SDL
-        keypad.poll();
-        if (app.quitRequested() || g_signal_exit_requested != 0) {
-            break;
-        }
-#endif
-        lv_timer_handler();
-        if (cap_gps::lvglHalQuitRequested() || g_signal_exit_requested != 0) {
-            break;
-        }
-        app.tick(lv_tick_get());
-        usleep(10000);
-    }
-
-    spdlog::info("Cap-LoRa-1262: exit requested (app={}, display={}, signal={})", app.quitRequested(),
-                 cap_gps::lvglHalQuitRequested(), static_cast<int>(g_signal_exit_requested));
-#if !LV_USE_SDL
-    alarm(kShutdownTimeoutSeconds);
-#endif
-    app.stop();
-#if !LV_USE_SDL
-    keypad.close();
-#endif
-    cap_gps::shutdownLvglHal();
-#if !LV_USE_SDL
+    // Keep the shutdown deadline active until app/keypad destructors have run.
     alarm(0);
-#endif
     spdlog::info("Cap-LoRa-1262: shutdown complete");
     return 0;
 }

@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=LoRa
-Exec=/usr/bin/sudo -n -- @CAP_LORA_EXEC_PATH@
+Exec=@CAP_LORA_EXEC_PATH@
 Terminal=false
 Icon=cap-lora-1262.png
 Type=Application
