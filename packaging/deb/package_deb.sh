@@ -155,10 +155,12 @@ MONTSERRAT_LICENSE_FILE="${ROOT_DIR}/dependencies/lvgl/scripts/built_in_font/fon
 SPDLOG_LICENSE_FILE="${ROOT_DIR}/dependencies/spdlog/LICENSE"
 SMOOTH_UI_LICENSE_FILE="${ROOT_DIR}/dependencies/smooth_ui_toolkit/LICENSE"
 RADIOLIB_LICENSE_FILE="${ROOT_DIR}/dependencies/RadioLib/license.txt"
+PIGWEED_LICENSE_FILE="${ROOT_DIR}/dependencies/pigweed/LICENSE"
+FUCHSIA_STDCOMPAT_LICENSE_FILE="${ROOT_DIR}/dependencies/pigweed/third_party/fuchsia/repo/LICENSE"
 for path in "${EXECUTABLE}" "${DESKTOP_TEMPLATE}" "${UDEV_RULES_FILE}" "${ICON_FILE}" "${LICENSE_FILE}" \
     "${THIRD_PARTY_NOTICES_FILE}" "${LVGL_LICENSE_FILE}" "${LODEPNG_LICENSE_FILE}" \
     "${MONTSERRAT_LICENSE_FILE}" "${SPDLOG_LICENSE_FILE}" "${SMOOTH_UI_LICENSE_FILE}" \
-    "${RADIOLIB_LICENSE_FILE}"; do
+    "${RADIOLIB_LICENSE_FILE}" "${PIGWEED_LICENSE_FILE}" "${FUCHSIA_STDCOMPAT_LICENSE_FILE}"; do
     if [[ ! -f "${path}" ]]; then
         echo "Required file not found: ${path}" >&2
         exit 1
@@ -235,6 +237,9 @@ install -m 644 "${SPDLOG_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NA
 install -m 644 "${SMOOTH_UI_LICENSE_FILE}" \
     "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/smooth_ui_toolkit.txt"
 install -m 644 "${RADIOLIB_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/RadioLib.txt"
+install -m 644 "${PIGWEED_LICENSE_FILE}" "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/pigweed.txt"
+install -m 644 "${FUCHSIA_STDCOMPAT_LICENSE_FILE}" \
+    "${STAGE_DIR}/usr/share/doc/${PACKAGE_NAME}/licenses/fuchsia-stdcompat.txt"
 
 INSTALLED_SIZE="$(du -sk "${STAGE_DIR}/usr" | awk '{print $1}')"
 cat >"${STAGE_DIR}/DEBIAN/control" <<EOF

@@ -8,7 +8,7 @@
 
 #include "models/lora_page_model.hpp"
 #include "models/lora_page_contract.hpp"
-#include "lora/lora_backend.hpp"
+#include "lora/cap_lora_1262.hpp"
 #include <lvgl.h>
 
 #include <algorithm>
@@ -59,6 +59,7 @@ private:
     cap_lora::LoraInfo lora_info_{};
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
     std::thread init_thread_;
+    std::unique_ptr<cap_lora::CapLoRa1262> lora_device_;
     uint32_t last_init_attempt_tick_ = 0;
     std::string pending_tx_text_;
 

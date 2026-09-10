@@ -17,9 +17,12 @@ Run the bootstrap script once after cloning this repository:
 ./bootstrap.sh
 ```
 
-It fetches `lvgl`, `spdlog`, `smooth_ui_toolkit`, and RadioLib under
-`dependencies/`. RadioLib supplies the SX1262 driver. SDL builds require SDL2
-development files.
+It fetches `lvgl`, `spdlog`, `smooth_ui_toolkit`, RadioLib, and `pigweed` under
+`dependencies/`. RadioLib supplies the SX1262 driver. Device builds compile
+Pigweed's `pw_spi_linux`, `pw_i2c_linux`, and `pw_digital_io_linux` Linux
+userspace drivers (with their Pigweed dependencies) into the binary; SDL builds
+do not use Pigweed.
+SDL builds require SDL2 development files.
 
 ## Build
 
@@ -81,7 +84,7 @@ match the CardputerZero Cap wiring):
 | `LORA_RST_CHIP`, `LORA_RST_OFFSET` | GPIO chip and line for SX1262 reset |
 | `LORA_BUSY_CHIP`, `LORA_BUSY_OFFSET` | GPIO chip and line for SX1262 BUSY |
 | `LORA_IRQ_CHIP`, `LORA_IRQ_OFFSET` | GPIO chip and line for SX1262 IRQ |
-| `HAT_5VOUT_CHIP`, `HAT_5VOUT_OFFSET` | Explicit legacy active-low GPIO override; both values must be set |
+| `HAT_5VOUT_CHIP`, `HAT_5VOUT_OFFSET` | Explicit active-low GPIO override for the 5V rail; both values must be set |
 
 The Debian package launches the app as the APPLaunch user. That user must be a
 member of the `video`, `input`, `gpio`, `spi`, and `i2c` groups, as configured

@@ -18,5 +18,10 @@
         "url": "https://github.com/jgromes/RadioLib.git",
         "path": "dependencies/RadioLib",
         "revision": "187ef24791c3d844939b2be13a68bd890bd04e4c"
+    },
+    {
+        "url": "https://github.com/dianjixz/pigweed.git",
+        "path": "dependencies/pigweed",
+        "revision": "9cffd077bfd5ff308af538026eb8857105be7676"
     }
 ]

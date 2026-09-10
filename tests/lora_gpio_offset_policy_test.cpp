@@ -1,4 +1,4 @@
-#include "lora/cp0_lora_gpio_offset_policy.hpp"
+#include "lora/cap_lora_1262.hpp"
 #include "test_support.hpp"
 
 int main()
