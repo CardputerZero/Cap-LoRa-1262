@@ -425,7 +425,7 @@ void LoraScreen::create_send_view()
     send_status_label_ = make_label(send_input_bubble_, "", 10, 54, 266, 16, &lv_font_montserrat_14,
                                     lv_color_hex(0xFED40D), LV_TEXT_ALIGN_RIGHT);
     set_visible(send_status_label_, false);
-    send_cancel_button_  = make_action_button(send_view_, 83, 113, 110, "ESC: Cancel", lv_color_hex(0x6D6D6D),
+    send_cancel_button_  = make_action_button(send_view_, 17, 113, 110, "ESC: Cancel", lv_color_hex(0x6D6D6D),
                                               lv_color_hex(0xF3F3F3), &LoraScreen::static_cancel_button_cb);
     send_confirm_button_ = make_action_button(send_view_, 203, 113, 100, "Enter: Send", lv_color_hex(0xFED40D),
                                               lv_color_hex(0x5E4D00), &LoraScreen::static_send_button_cb);
