@@ -13,20 +13,16 @@
 
 namespace {
 
-#if !LV_USE_SDL
 // APPLaunch sends SIGKILL after a three-second grace period. Keep our own
 // deadline shorter so cleanup cannot consume the launcher's entire window.
 constexpr unsigned int kShutdownTimeoutSeconds = 2;
-#endif
 volatile std::sig_atomic_t g_signal_exit_requested = 0;
 
 void requestExitFromSignal(int signal)
 {
     if (g_signal_exit_requested != 0) return;
     g_signal_exit_requested = signal;
-#if !LV_USE_SDL
     alarm(kShutdownTimeoutSeconds);
-#endif
 }
 
 void forceExitAfterShutdownTimeout(int)
@@ -114,9 +110,7 @@ int main()
                      cap_gps::lvglHalQuitRequested(), static_cast<int>(g_signal_exit_requested));
         // A signal handler has already started the deadline. Do not move that
         // deadline later; only arm it for exits requested by the UI.
-#if !LV_USE_SDL
         if (g_signal_exit_requested == 0) alarm(kShutdownTimeoutSeconds);
-#endif
         app.stop();
 #if !LV_USE_SDL
         keypad.close();
