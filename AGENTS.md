@@ -66,7 +66,7 @@ cmake -S . -B build/cp0 -DCAP_LORA_USE_SDL=OFF
 cmake --build build/cp0 -j8
 ```
 
-测试 —— 两个变体都要跑(与 CI 一致):
+本地测试 —— 两个变体都要跑;GitHub Actions 仅运行设备变体测试和 Debian 打包:
 
 ```bash
 cmake -S . -B build/tests -DCAP_LORA_USE_SDL=ON -DBUILD_TESTING=ON

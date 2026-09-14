@@ -43,13 +43,16 @@ cmake --build build/cp0 -j8
 The desktop and device binaries are written to `dist/sdl/` and `dist/device/`
 respectively.
 
-Run the tests with:
+Run the SDL tests locally with:
 
 ```bash
 cmake -S . -B build/tests -DCAP_LORA_USE_SDL=ON -DBUILD_TESTING=ON
 cmake --build build/tests -j8
 ctest --test-dir build/tests --output-on-failure
 ```
+
+GitHub Actions runs only the device test suite (`CAP_LORA_USE_SDL=OFF`) and
+builds the Debian package. SDL builds and tests are reserved for local development.
 
 Startup and shutdown logs are flushed immediately so they survive the forced
 shutdown deadline. LVGL warnings and assertion failures include their source
