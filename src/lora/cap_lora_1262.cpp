@@ -2,6 +2,7 @@
 
 #include "cap_lora_1262.hpp"
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
@@ -147,17 +148,22 @@ public:
 
 bool cap_lora::CapLoRa1262::InitHard()
 {
-    if (!cp0_lora_hat_power_controller::enable(5)) return false;
+    if (!cp0_lora_ext_power_controller::enable()) return false;
     // Let the controller snapshot and restore the expander registers. Direct
     // writes here would leave P0 configured after the application exits.
     if (!cp0_lora_pi4io_controller::scan_and_initialize()) {
-        cp0_lora_hat_power_controller::shutdown();
+        std::fprintf(stderr, "[cap_lora] PI4IO scan unavailable; continue with direct SX1262 GPIO/SPI\n");
+    }
+    if (!cp0_lora_hat_power_controller::enable(5)) {
+        cp0_lora_pi4io_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
     auto i2c = pw::i2c::LinuxInitiator::OpenI2cBus("/dev/i2c-1");
     if (!i2c.ok()) {
         cp0_lora_pi4io_controller::shutdown();
         cp0_lora_hat_power_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
     I2cInitiator_ = std::make_shared<pw::i2c::LinuxInitiator>(std::move(*i2c));
@@ -167,6 +173,7 @@ bool cap_lora::CapLoRa1262::InitHard()
         I2cInitiator_.reset();
         cp0_lora_pi4io_controller::shutdown();
         cp0_lora_hat_power_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
     char candidates[8][64] = {};
@@ -185,6 +192,7 @@ bool cap_lora::CapLoRa1262::InitHard()
         I2cInitiator_.reset();
         cp0_lora_pi4io_controller::shutdown();
         cp0_lora_hat_power_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
     spi_initiator_ = std::make_shared<pw::spi::LinuxInitiator>(spi_fd, 1000000);
@@ -196,6 +204,7 @@ bool cap_lora::CapLoRa1262::InitHard()
         pi4ioe5v6408_.reset();
         cp0_lora_pi4io_controller::shutdown();
         cp0_lora_hat_power_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
 
@@ -206,6 +215,7 @@ bool cap_lora::CapLoRa1262::InitHard()
         pi4ioe5v6408_.reset();
         cp0_lora_pi4io_controller::shutdown();
         cp0_lora_hat_power_controller::shutdown();
+        cp0_lora_ext_power_controller::restore();
         return false;
     }
     gpio_chip_ = std::make_shared<pw::digital_io::LinuxDigitalIoChip>(std::move(*gpio));
@@ -263,9 +273,14 @@ bool cap_lora::CapLoRa1262::initialize()
 {
     if (stop_requested_.load(std::memory_order_acquire)) return false;
     if (!sx1262_ && !probe()) return false;
-    if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) return false;
-    if (sx1262_->setCurrentLimit(140) != RADIOLIB_ERR_NONE || sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE)
+    if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) {
+        shutdown();
         return false;
+    }
+    if (sx1262_->setCurrentLimit(140) != RADIOLIB_ERR_NONE || sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE) {
+        shutdown();
+        return false;
+    }
     sx1262_->setPacketReceivedAction(&CapLoRa1262::on_packet_received);
     sx1262_->setPacketSentAction(&CapLoRa1262::on_packet_transmitted);
     initialized_ = true;
@@ -278,7 +293,11 @@ bool cap_lora::CapLoRa1262::initialize()
     last_tx_.clear();
     received_flag_.store(false, std::memory_order_release);
     transmitted_flag_.store(false, std::memory_order_release);
-    return set_rx_mode();
+    if (!set_rx_mode()) {
+        shutdown();
+        return false;
+    }
+    return true;
 }
 
 bool cap_lora::CapLoRa1262::set_rx_mode()
@@ -353,6 +372,7 @@ void cap_lora::CapLoRa1262::shutdown()
     MyModule_.reset();
     cp0_lora_pi4io_controller::shutdown();
     cp0_lora_hat_power_controller::shutdown();
+    cp0_lora_ext_power_controller::restore();
     cp0_lora_backend::gpio_release_all();
     pi4ioe5v6408_.reset();
     RadioHal_.reset();
@@ -770,6 +790,123 @@ void shutdown()
 }
 
 }  // namespace cp0_lora_hat_power_controller
+
+// Amalgamated from cp0_lora_ext_power_controller.cpp.
+
+namespace cp0_lora_ext_power_controller {
+namespace {
+
+enum class Output : std::size_t {
+    EXT5V = 0,
+    GROVE5V,
+    COUNT,
+};
+
+constexpr std::array<const char*, static_cast<std::size_t>(Output::COUNT)> kBrightnessPaths = {{
+    "/sys/class/leds/ext_5v_out/brightness",
+    "/sys/class/leds/grove_5v_out/brightness",
+}};
+constexpr unsigned int kPowerSettleUs = 150000;
+
+struct OutputState {
+    int previous_value = 0;
+    bool restore_needed = false;
+};
+
+std::array<OutputState, static_cast<std::size_t>(Output::COUNT)> output_states{};
+std::mutex output_mutex;
+bool active = false;
+
+bool read_value(const char* path, int* value)
+{
+    if (!path || !value) return false;
+    const int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buffer[16] = {};
+    ssize_t size;
+    do {
+        size = read(fd, buffer, sizeof(buffer) - 1);
+    } while (size < 0 && errno == EINTR);
+    close(fd);
+    if (size <= 0) return false;
+    char* end = nullptr;
+    errno = 0;
+    const long parsed = std::strtol(buffer, &end, 10);
+    if (errno != 0 || end == buffer) return false;
+    *value = static_cast<int>(parsed);
+    return true;
+}
+
+bool write_value(const char* path, int value)
+{
+    if (!path) return false;
+    const int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return false;
+    char buffer[16] = {};
+    const int length = std::snprintf(buffer, sizeof(buffer), "%d", value);
+    const ssize_t written = length > 0 ? write(fd, buffer, static_cast<std::size_t>(length)) : -1;
+    close(fd);
+    return written == length;
+}
+
+void restore_locked() noexcept
+{
+    for (std::size_t index = 0; index < output_states.size(); ++index) {
+        auto& output = output_states[index];
+        if (!output.restore_needed) continue;
+        if (write_value(kBrightnessPaths[index], output.previous_value)) {
+            output.restore_needed = false;
+        } else {
+            SLOGI("ExtPort restore failed: %s", kBrightnessPaths[index]);
+        }
+    }
+    active = false;
+}
+
+}  // namespace
+
+bool enable()
+{
+    std::lock_guard<std::mutex> lock(output_mutex);
+    if (active) return true;
+
+    for (std::size_t index = 0; index < output_states.size(); ++index) {
+        auto& output = output_states[index];
+        if (!read_value(kBrightnessPaths[index], &output.previous_value)) {
+            SLOGI("ExtPort read failed: %s", kBrightnessPaths[index]);
+            restore_locked();
+            return false;
+        }
+        if (output.previous_value > 0) continue;
+        output.restore_needed = true;
+        if (!write_value(kBrightnessPaths[index], 1)) {
+            SLOGI("ExtPort enable failed: %s", kBrightnessPaths[index]);
+            restore_locked();
+            return false;
+        }
+    }
+
+    for (std::size_t index = 0; index < output_states.size(); ++index) {
+        int value = 0;
+        if (!read_value(kBrightnessPaths[index], &value) || value <= 0) {
+            SLOGI("ExtPort readback failed: %s", kBrightnessPaths[index]);
+            restore_locked();
+            return false;
+        }
+    }
+    active = true;
+    usleep(kPowerSettleUs);
+    SLOGI("ExtPort enabled: EXT5V/GROVE5V (settle=%uus)", kPowerSettleUs);
+    return true;
+}
+
+void restore() noexcept
+{
+    std::lock_guard<std::mutex> lock(output_mutex);
+    restore_locked();
+}
+
+}  // namespace cp0_lora_ext_power_controller
 
 // Amalgamated from cp0_lora_pi4io_controller.cpp.
 

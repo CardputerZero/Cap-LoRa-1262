@@ -220,6 +220,11 @@ bool enable(int fallback_gpio);
 void shutdown();
 }  // namespace cp0_lora_hat_power_controller
 
+namespace cp0_lora_ext_power_controller {
+bool enable();
+void restore() noexcept;
+}  // namespace cp0_lora_ext_power_controller
+
 namespace cp0_lora_pi4io_controller {
 bool scan_and_initialize();
 void request_stop() noexcept;

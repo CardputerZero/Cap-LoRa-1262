@@ -238,9 +238,8 @@ if(NOT CAP_LORA_USE_SDL)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
         target_compile_options(cap_lora_pigweed PRIVATE -Wno-return-type)
     endif()
-    # Pigweed's sources use C++20 (designated initializers and friends) while
-    # the application itself stays on C++17; the library links through the
-    # stable C++ ABI either way.
+    # Keep the device application on the same C++20 pw::span representation as
+    # the Linux bus libraries; mixing C++17 and C++20 changes the span layout.
     set_target_properties(cap_lora_pigweed PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
     target_link_libraries(cap_lora_pigweed PUBLIC Threads::Threads)
 endif()
@@ -312,6 +311,9 @@ target_include_directories(cap_lora_pigweed_headers SYSTEM INTERFACE
 
 add_executable(${CAP_LORA_BIN_NAME} ${CAP_LORA_APP_CPP})
 target_include_directories(${CAP_LORA_BIN_NAME} PRIVATE "${CAP_LORA_SRC_DIR}")
+if(NOT CAP_LORA_USE_SDL)
+    set_target_properties(${CAP_LORA_BIN_NAME} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON)
+endif()
 if(CAP_LORA_USE_SDL)
     target_link_libraries(${CAP_LORA_BIN_NAME} PRIVATE cap_lora_pigweed_headers)
 endif()
