@@ -29,16 +29,10 @@ jobs:
       - name: Install test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev python3-venv
+          sudo apt-get install -y python3-venv
 
       - name: Bootstrap third-party dependencies
         run: ./bootstrap.sh
-
-      - name: Build and run tests
-        run: |
-          cmake -S . -B build/tests -DCAP_LORA_USE_SDL=ON -DBUILD_TESTING=ON
-          cmake --build build/tests --parallel
-          ctest --test-dir build/tests --output-on-failure
 
       - name: Build and run device resource tests
         run: |

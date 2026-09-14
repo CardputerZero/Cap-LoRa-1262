@@ -10,6 +10,7 @@
 #include <exception>
 #include <mutex>
 #include <thread>
+#include <spdlog/spdlog.h>
 
 namespace lora_app_detail {
 
@@ -121,6 +122,7 @@ void LoraScreen::onExit()
     if (!app_active_ && !poll_timer_ && !initialization_state_ &&
         !init_thread_.joinable() && !page_root_)
         return;
+    spdlog::info("LoraScreen: onExit begin; cancelling animations and poll timer");
     cancel_view_animations();
     cancel_message_title_animation();
     app_active_ = false;
@@ -128,10 +130,14 @@ void LoraScreen::onExit()
     // Tell the worker to stop before reaping it. The worker only owns the
     // shared state, so it can safely observe this flag while the page is being
     // destroyed and will not start another hardware phase after cancellation.
+    spdlog::info("LoraScreen: requesting radio worker stop");
     if (initialization_state_) initialization_state_->stop_requested.store(true, std::memory_order_release);
     if (lora_device_) lora_device_->request_stop();
+    spdlog::info("LoraScreen: radio worker join begin (joinable={})", init_thread_.joinable());
     if (init_thread_.joinable()) init_thread_.join();
+    spdlog::info("LoraScreen: radio worker join complete; radio shutdown begin");
     if (lora_device_) lora_device_->shutdown();
+    spdlog::info("LoraScreen: radio shutdown complete; page deletion begin");
     initialization_state_.reset();
     initialization_pending_ = false;
     pending_tx_text_.clear();
@@ -140,6 +146,7 @@ void LoraScreen::onExit()
     page_root_ = nullptr;
     root_screen_ = nullptr;
     active_view_ = nullptr;
+    spdlog::info("LoraScreen: onExit complete");
 }
 
 void LoraScreen::tick(uint32_t)
