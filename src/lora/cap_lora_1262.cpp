@@ -273,9 +273,14 @@ bool cap_lora::CapLoRa1262::initialize()
 {
     if (stop_requested_.load(std::memory_order_acquire)) return false;
     if (!sx1262_ && !probe()) return false;
-    if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) return false;
-    if (sx1262_->setCurrentLimit(140) != RADIOLIB_ERR_NONE || sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE)
+    if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) {
+        shutdown();
         return false;
+    }
+    if (sx1262_->setCurrentLimit(140) != RADIOLIB_ERR_NONE || sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE) {
+        shutdown();
+        return false;
+    }
     sx1262_->setPacketReceivedAction(&CapLoRa1262::on_packet_received);
     sx1262_->setPacketSentAction(&CapLoRa1262::on_packet_transmitted);
     initialized_ = true;
@@ -288,7 +293,11 @@ bool cap_lora::CapLoRa1262::initialize()
     last_tx_.clear();
     received_flag_.store(false, std::memory_order_release);
     transmitted_flag_.store(false, std::memory_order_release);
-    return set_rx_mode();
+    if (!set_rx_mode()) {
+        shutdown();
+        return false;
+    }
+    return true;
 }
 
 bool cap_lora::CapLoRa1262::set_rx_mode()
