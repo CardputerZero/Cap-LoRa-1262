@@ -332,6 +332,9 @@ bool LoraScreen::handle_send_key(uint32_t key)
     } else if (key == LV_KEY_DOWN) {
         move_send_cursor_vertical(1);
         update_send_content();
+    } else if (key == LV_KEY_END) {
+        model_.set_cursor_position(model_.tx_input().size());
+        update_send_content();
     } else if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         model_.erase_character();
         update_send_content();
