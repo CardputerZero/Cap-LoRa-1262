@@ -19,6 +19,7 @@ constexpr lv_coord_t kBubbleTailWidth     = 6;
 constexpr lv_coord_t kBubbleTailDrop      = 3;
 constexpr lv_coord_t kSendCursorWidth     = 2;
 constexpr lv_coord_t kSendCursorHeight    = 17;
+constexpr lv_coord_t kSendInputLetterGap = 2;
 constexpr uint32_t kSendCursorBlinkMs     = 500;
 
 static const char *safe_text(const char *text, const char *fallback = "")
@@ -176,7 +177,10 @@ void LoraScreen::update_send_cursor()
     if (!send_cursor_label_ || !send_input_label_) return;
     lv_point_t position{};
     lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
-    lv_obj_set_pos(send_cursor_label_, lv_obj_get_x(send_input_label_) + position.x,
+    const lv_coord_t cursor_gap = position.x > 0
+                                      ? (lora_app_detail::kSendInputLetterGap + lora_app_detail::kSendCursorWidth) / 2
+                                      : 0;
+    lv_obj_set_pos(send_cursor_label_, lv_obj_get_x(send_input_label_) + position.x - cursor_gap,
                    lv_obj_get_y(send_input_label_) + position.y);
     const bool visible = model_.view() == LoraView::SEND &&
                          (lv_tick_get() / lora_app_detail::kSendCursorBlinkMs) % 2 == 0;
@@ -447,6 +451,9 @@ void LoraScreen::create_send_view()
     if (send_input_bubble_) lv_obj_align(send_input_bubble_, LV_ALIGN_CENTER, 0, -12);
     send_input_label_  = make_label(send_input_bubble_, "", 10, 8, 266, 64, &lv_font_montserrat_14,
                                     lv_color_hex(0xFFFFFF), LV_TEXT_ALIGN_LEFT);
+    if (send_input_label_)
+        lv_obj_set_style_text_letter_space(send_input_label_, lora_app_detail::kSendInputLetterGap,
+                                           LV_PART_MAIN | LV_STATE_DEFAULT);
     send_cursor_label_ = make_panel(send_input_bubble_, 10, 8, lora_app_detail::kSendCursorWidth,
                                     lora_app_detail::kSendCursorHeight,
                                     lv_color_hex(0x153E8A), LV_OPA_COVER, 0);
