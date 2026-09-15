@@ -20,6 +20,7 @@ constexpr lv_coord_t kBubbleTailDrop      = 3;
 constexpr lv_coord_t kSendCursorWidth     = 2;
 constexpr lv_coord_t kSendCursorHeight    = 17;
 constexpr lv_coord_t kSendInputLetterGap = 2;
+constexpr uint32_t kSendCursorColor      = 0x0B5D1E;
 constexpr uint32_t kSendCursorBlinkMs     = 500;
 
 static const char *safe_text(const char *text, const char *fallback = "")
@@ -359,7 +360,8 @@ void LoraScreen::render_current_view()
 
 void LoraScreen::create_ui()
 {
-    page_root_ = make_panel(root_screen_, 0, 0, lora_app_detail::kScreenWidth, lora_app_detail::kContentHeight,
+    const lv_coord_t root_height = root_screen_ ? lv_obj_get_height(root_screen_) : lora_app_detail::kContentHeight;
+    page_root_ = make_panel(root_screen_, 0, 0, lora_app_detail::kScreenWidth, root_height,
                             lv_color_hex(0x0B0C0E), LV_OPA_COVER, 0);
     if (!page_root_) return;
     lv_obj_add_event_cb(page_root_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
@@ -456,7 +458,7 @@ void LoraScreen::create_send_view()
                                            LV_PART_MAIN | LV_STATE_DEFAULT);
     send_cursor_label_ = make_panel(send_input_bubble_, 10, 8, lora_app_detail::kSendCursorWidth,
                                     lora_app_detail::kSendCursorHeight,
-                                    lv_color_hex(0x153E8A), LV_OPA_COVER, 0);
+                                    lv_color_hex(lora_app_detail::kSendCursorColor), LV_OPA_COVER, 0);
     send_status_label_ = make_label(send_input_bubble_, "", 10, 54, 266, 16, &lv_font_montserrat_14,
                                     lv_color_hex(0xFED40D), LV_TEXT_ALIGN_RIGHT);
     set_visible(send_status_label_, false);
@@ -482,7 +484,7 @@ lv_obj_t *LoraScreen::make_action_button(lv_obj_t *parent, lv_coord_t x, lv_coor
 
 void LoraScreen::create_page_indicator()
 {
-    page_indicator_ = make_panel(page_root_, 141, 137, 38, 24, lv_color_hex(0x0B0C0E), LV_OPA_COVER, 7);
+    page_indicator_ = make_panel(page_root_, 141, 157, 38, 24, lv_color_hex(0x0B0C0E), LV_OPA_COVER, 7);
     if (!page_indicator_) return;
     lv_obj_add_event_cb(page_indicator_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
     page_dots_[0] = make_panel(page_indicator_, 11, 3, 5, 5, lv_color_hex(0xE4E4E4), LV_OPA_COVER, LV_RADIUS_CIRCLE);
