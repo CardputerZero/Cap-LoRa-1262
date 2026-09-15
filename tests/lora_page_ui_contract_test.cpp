@@ -81,8 +81,6 @@ constexpr View navigation_view(View current, int key)
 {
     if (key == 'z' || key == 'Z' || key == 0x14) return View::messages; // LV_KEY_LEFT/PREV
     if (key == 'c' || key == 'C' || key == 0x15) return View::info;     // LV_KEY_RIGHT/NEXT
-    if (key == 0x10) return View::messages;                              // LV_KEY_UP
-    if (key == 0x11) return View::info;                                  // LV_KEY_DOWN
     return current;
 }
 
@@ -124,8 +122,8 @@ int main()
 
     CHECK(navigation_view(View::send, 'z') == View::messages);
     CHECK(navigation_view(View::messages, 'C') == View::info);
-    CHECK(navigation_view(View::info, 0x10) == View::messages);
-    CHECK(navigation_view(View::messages, 0x11) == View::info);
+    CHECK(navigation_view(View::info, 0x10) == View::info);
+    CHECK(navigation_view(View::messages, 0x11) == View::messages);
     CHECK(navigation_view(View::info, 'q') == View::info);
 
     CHECK(printable_ascii(' '));

@@ -353,11 +353,10 @@ bool LoraScreen::handle_navigation_key(uint32_t key)
         scroll_messages(key == LV_KEY_UP ? lora_app_detail::kMessageScrollStep : -lora_app_detail::kMessageScrollStep);
         return true;
     }
-    if (model_.view() != LoraView::MESSAGES && (key == LV_KEY_UP || key == LV_KEY_DOWN)) {
-        model_.set_view(key == LV_KEY_UP ? LoraView::MESSAGES : LoraView::INFO);
-        render_current_view();
+    if (model_.view() == LoraView::INFO &&
+        (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ENTER ||
+         lora_app_detail::is_printable_ascii(key)))
         return true;
-    }
     if (key == LV_KEY_ENTER) {
         if (initialization_pending_ || !lora_info_.hw_ready) return true;
         open_send_view(0);

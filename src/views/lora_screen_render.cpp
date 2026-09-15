@@ -213,7 +213,9 @@ void LoraScreen::move_send_cursor_vertical(int direction)
     if (!send_input_label_ || direction == 0) return;
     lv_point_t position{};
     lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
-    position.y += direction * lv_font_get_line_height(lv_obj_get_style_text_font(send_input_label_, LV_PART_MAIN));
+    const lv_coord_t line_height = lv_font_get_line_height(lv_obj_get_style_text_font(send_input_label_, LV_PART_MAIN));
+    const lv_coord_t line_step = line_height + lv_obj_get_style_text_line_space(send_input_label_, LV_PART_MAIN);
+    position.y += direction * line_step + line_height / 2;
     const uint32_t target = lv_label_get_letter_on(send_input_label_, &position, false);
     if (target != model_.cursor_position()) model_.set_cursor_position(target);
 }
