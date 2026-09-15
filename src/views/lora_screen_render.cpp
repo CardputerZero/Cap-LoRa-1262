@@ -9,6 +9,7 @@
 namespace lora_app_detail {
 
 constexpr lv_coord_t kScreenWidth         = 320;
+constexpr lv_coord_t kScreenHeight        = 170;
 constexpr lv_coord_t kContentHeight       = 150;
 constexpr uint32_t kViewTransitionMs      = 150;
 constexpr uint32_t kMessageTitleHoldMs    = 3200;
@@ -17,6 +18,21 @@ constexpr lv_coord_t kMessageTitleShownY  = -8;
 constexpr lv_coord_t kMessageTitleHiddenY = -29;
 constexpr lv_coord_t kBubbleTailWidth     = 6;
 constexpr lv_coord_t kBubbleTailDrop      = 3;
+constexpr lv_coord_t kSendCursorWidth     = 2;
+constexpr lv_coord_t kSendCursorHeight    = 17;
+constexpr lv_coord_t kSendInputLetterGap = 2;
+constexpr uint32_t kSendCursorColor      = 0x153E8A;
+constexpr uint32_t kSendCursorBlinkMs     = 500;
+constexpr lv_coord_t kSendActionButtonHeight = 26;
+constexpr lv_coord_t kSendActionButtonY      = kScreenHeight - kSendActionButtonHeight;
+constexpr lv_coord_t kSendInputTop            = 22;
+constexpr lv_coord_t kSendInputButtonGap      = 5;
+constexpr lv_coord_t kSendInputHeight         = kSendActionButtonY - kSendInputTop - kSendInputButtonGap;
+constexpr lv_coord_t kSendInputTextTop        = 8;
+constexpr lv_coord_t kSendInputStatusHeight   = 16;
+constexpr lv_coord_t kSendInputStatusGap      = 3;
+constexpr lv_coord_t kSendInputStatusY = kSendInputHeight - kSendInputStatusHeight - kSendInputStatusGap;
+constexpr lv_coord_t kSendInputTextHeight = kSendInputHeight - kSendInputTextTop - kSendInputStatusGap;
 
 static const char *safe_text(const char *text, const char *fallback = "")
 {
@@ -160,12 +176,48 @@ void LoraScreen::update_info_content()
 void LoraScreen::update_send_content()
 {
     if (!send_input_label_ || !send_status_label_) return;
-    std::string display = model_.tx_input() + "|";
-    lv_label_set_text(send_input_label_, display.c_str());
+    lv_label_set_text(send_input_label_, model_.tx_input().c_str());
     lv_obj_set_style_text_color(send_input_label_, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     bool has_status = !model_.send_status().empty();
     lv_label_set_text(send_status_label_, has_status ? model_.send_status().c_str() : "");
     set_visible(send_status_label_, has_status);
+    update_send_cursor();
+}
+
+void LoraScreen::update_send_cursor()
+{
+    if (!send_cursor_label_ || !send_input_label_) return;
+    lv_obj_update_layout(send_input_label_);
+    lv_point_t position{};
+    lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
+    const lv_coord_t viewport_height = model_.send_status().empty()
+                                           ? lora_app_detail::kSendInputTextHeight
+                                           : lora_app_detail::kSendInputStatusY -
+                                                 lora_app_detail::kSendInputTextTop -
+                                                 lora_app_detail::kSendInputStatusGap;
+    const lv_coord_t scroll_offset =
+        std::max<lv_coord_t>(0, position.y + lora_app_detail::kSendCursorHeight - viewport_height);
+    lv_obj_set_y(send_input_label_, lora_app_detail::kSendInputTextTop - scroll_offset);
+    const lv_coord_t cursor_gap = position.x > 0
+                                      ? (lora_app_detail::kSendInputLetterGap + lora_app_detail::kSendCursorWidth) / 2
+                                      : 0;
+    lv_obj_set_pos(send_cursor_label_, lv_obj_get_x(send_input_label_) + position.x - cursor_gap,
+                   lv_obj_get_y(send_input_label_) + position.y);
+    const bool visible = model_.view() == LoraView::SEND &&
+                         (lv_tick_get() / lora_app_detail::kSendCursorBlinkMs) % 2 == 0;
+    set_visible(send_cursor_label_, visible);
+}
+
+void LoraScreen::move_send_cursor_vertical(int direction)
+{
+    if (!send_input_label_ || direction == 0) return;
+    lv_point_t position{};
+    lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
+    const lv_coord_t line_height = lv_font_get_line_height(lv_obj_get_style_text_font(send_input_label_, LV_PART_MAIN));
+    const lv_coord_t line_step = line_height + lv_obj_get_style_text_line_space(send_input_label_, LV_PART_MAIN);
+    position.y += direction * line_step + line_height / 2;
+    const uint32_t target = lv_label_get_letter_on(send_input_label_, &position, false);
+    if (target != model_.cursor_position()) model_.set_cursor_position(target);
 }
 
 void LoraScreen::scroll_to_latest(lv_anim_enable_t animation)
@@ -330,7 +382,7 @@ void LoraScreen::render_current_view()
 
 void LoraScreen::create_ui()
 {
-    page_root_ = make_panel(root_screen_, 0, 0, lora_app_detail::kScreenWidth, lora_app_detail::kContentHeight,
+    page_root_ = make_panel(root_screen_, 0, 0, lora_app_detail::kScreenWidth, lora_app_detail::kScreenHeight,
                             lv_color_hex(0x0B0C0E), LV_OPA_COVER, 0);
     if (!page_root_) return;
     lv_obj_add_event_cb(page_root_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
@@ -368,7 +420,7 @@ void LoraScreen::create_messages_view()
 
     empty_message_label_      = make_label(messages_view_, "No messages yet", 0, 50, 320, 16, &lv_font_montserrat_12,
                                            lv_color_hex(0xB2B2B2), LV_TEXT_ALIGN_CENTER);
-    empty_message_hint_label_ = make_label(messages_view_, "Type anything to send", 0, 68, 320, 14,
+    empty_message_hint_label_ = make_label(messages_view_, "Type anything to send", 0, 68, 320, 16,
                                            &lv_font_montserrat_12, lv_color_hex(0x5FE492), LV_TEXT_ALIGN_CENTER);
     messages_title_           = make_panel(messages_view_, 108, lora_app_detail::kMessageTitleShownY, 104, 28,
                                            lv_color_hex(0x0B0C0E), LV_OPA_COVER, 8);
@@ -413,21 +465,33 @@ void LoraScreen::create_info_view()
 
 void LoraScreen::create_send_view()
 {
-    send_view_ = make_plain_container(page_root_, 0, 0, 320, 150);
+    send_view_ = make_plain_container(page_root_, 0, 0, lora_app_detail::kScreenWidth,
+                                      lora_app_detail::kScreenHeight);
     if (!send_view_) return;
     lv_obj_add_event_cb(send_view_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
     make_label(send_view_, "New Message", 0, 0, 320, 18, &lv_font_montserrat_14, lv_color_hex(0xE4E4E4),
                LV_TEXT_ALIGN_CENTER);
-    send_input_bubble_ = make_panel(send_view_, 0, 0, 286, 80, lv_color_hex(0x555555), LV_OPA_COVER, 8);
-    if (send_input_bubble_) lv_obj_align(send_input_bubble_, LV_ALIGN_CENTER, 0, -12);
-    send_input_label_  = make_label(send_input_bubble_, "", 10, 8, 266, 64, &lv_font_montserrat_14,
+    send_input_bubble_ = make_panel(send_view_, 17, lora_app_detail::kSendInputTop, 286,
+                                    lora_app_detail::kSendInputHeight, lv_color_hex(0x555555), LV_OPA_COVER, 8);
+    send_input_label_  = make_label(send_input_bubble_, "", 10, lora_app_detail::kSendInputTextTop, 266,
+                                    LV_SIZE_CONTENT, &lv_font_montserrat_14,
                                     lv_color_hex(0xFFFFFF), LV_TEXT_ALIGN_LEFT);
-    send_status_label_ = make_label(send_input_bubble_, "", 10, 54, 266, 16, &lv_font_montserrat_14,
+    if (send_input_label_)
+        lv_obj_set_style_text_letter_space(send_input_label_, lora_app_detail::kSendInputLetterGap,
+                                           LV_PART_MAIN | LV_STATE_DEFAULT);
+    send_cursor_label_ = make_panel(send_input_bubble_, 10, lora_app_detail::kSendInputTextTop,
+                                    lora_app_detail::kSendCursorWidth,
+                                    lora_app_detail::kSendCursorHeight,
+                                    lv_color_hex(lora_app_detail::kSendCursorColor), LV_OPA_COVER, 0);
+    send_status_label_ = make_label(send_input_bubble_, "", 10, lora_app_detail::kSendInputStatusY,
+                                    266, lora_app_detail::kSendInputStatusHeight, &lv_font_montserrat_14,
                                     lv_color_hex(0xFED40D), LV_TEXT_ALIGN_RIGHT);
     set_visible(send_status_label_, false);
-    send_cancel_button_  = make_action_button(send_view_, 17, 113, 110, "ESC: Cancel", lv_color_hex(0x6D6D6D),
+    send_cancel_button_  = make_action_button(send_view_, 17, lora_app_detail::kSendActionButtonY, 110, "ESC: Cancel",
+                                              lv_color_hex(0x6D6D6D),
                                               lv_color_hex(0xF3F3F3), &LoraScreen::static_cancel_button_cb);
-    send_confirm_button_ = make_action_button(send_view_, 203, 113, 100, "Enter: Send", lv_color_hex(0xFED40D),
+    send_confirm_button_ = make_action_button(send_view_, 203, lora_app_detail::kSendActionButtonY, 100, "Enter: Send",
+                                              lv_color_hex(0xFED40D),
                                               lv_color_hex(0x5E4D00), &LoraScreen::static_send_button_cb);
 }
 
@@ -435,7 +499,8 @@ lv_obj_t *LoraScreen::make_action_button(lv_obj_t *parent, lv_coord_t x, lv_coor
                                          const char *text, lv_color_t background, lv_color_t foreground,
                                          lv_event_cb_t callback)
 {
-    lv_obj_t *button = make_panel(parent, x, y, width, 26, background, LV_OPA_COVER, 5);
+    lv_obj_t *button = make_panel(parent, x, y, width, lora_app_detail::kSendActionButtonHeight, background,
+                                  LV_OPA_COVER, 5);
     if (!button) return nullptr;
     lv_obj_add_flag(button, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(button, callback, LV_EVENT_CLICKED, this);
@@ -447,7 +512,7 @@ lv_obj_t *LoraScreen::make_action_button(lv_obj_t *parent, lv_coord_t x, lv_coor
 
 void LoraScreen::create_page_indicator()
 {
-    page_indicator_ = make_panel(page_root_, 141, 137, 38, 24, lv_color_hex(0x0B0C0E), LV_OPA_COVER, 7);
+    page_indicator_ = make_panel(page_root_, 141, 157, 38, 24, lv_color_hex(0x0B0C0E), LV_OPA_COVER, 7);
     if (!page_indicator_) return;
     lv_obj_add_event_cb(page_indicator_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
     page_dots_[0] = make_panel(page_indicator_, 11, 3, 5, 5, lv_color_hex(0xE4E4E4), LV_OPA_COVER, LV_RADIUS_CIRCLE);

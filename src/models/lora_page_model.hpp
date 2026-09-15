@@ -30,6 +30,8 @@ public:
     void cancel_send();
     bool append_character(char character);
     bool erase_character();
+    bool move_cursor(int offset);
+    void set_cursor_position(size_t position);
     void set_send_status(std::string status) { send_status_ = std::move(status); }
     void complete_send();
 
@@ -38,12 +40,14 @@ public:
     bool resolve_latest_pending(bool sent);
 
     const std::string &tx_input() const { return tx_input_; }
+    size_t cursor_position() const { return tx_cursor_; }
     const std::string &send_status() const { return send_status_; }
     const std::deque<LoraChatMessage> &messages() const { return messages_; }
 
 private:
     LoraView view_ = LoraView::MESSAGES;
     std::string tx_input_;
+    size_t tx_cursor_ = 0;
     std::string send_status_;
     std::deque<LoraChatMessage> messages_;
 };

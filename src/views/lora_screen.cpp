@@ -322,6 +322,16 @@ bool LoraScreen::handle_send_key(uint32_t key)
 {
     if (key == LV_KEY_ESC) {
         cancel_send();
+    } else if (key == LV_KEY_LEFT) {
+        if (model_.move_cursor(-1)) update_send_content();
+    } else if (key == LV_KEY_RIGHT) {
+        if (model_.move_cursor(1)) update_send_content();
+    } else if (key == LV_KEY_UP) {
+        move_send_cursor_vertical(-1);
+        update_send_content();
+    } else if (key == LV_KEY_DOWN) {
+        move_send_cursor_vertical(1);
+        update_send_content();
     } else if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         model_.erase_character();
         update_send_content();
@@ -350,11 +360,10 @@ bool LoraScreen::handle_navigation_key(uint32_t key)
         scroll_messages(key == LV_KEY_UP ? lora_app_detail::kMessageScrollStep : -lora_app_detail::kMessageScrollStep);
         return true;
     }
-    if (model_.view() != LoraView::MESSAGES && (key == LV_KEY_UP || key == LV_KEY_DOWN)) {
-        model_.set_view(key == LV_KEY_UP ? LoraView::MESSAGES : LoraView::INFO);
-        render_current_view();
+    if (model_.view() == LoraView::INFO &&
+        (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ENTER ||
+         lora_app_detail::is_printable_ascii(key)))
         return true;
-    }
     if (key == LV_KEY_ENTER) {
         if (initialization_pending_ || !lora_info_.hw_ready) return true;
         open_send_view(0);
@@ -397,7 +406,7 @@ void LoraScreen::send_current_text()
         return;
     }
     if (model_.tx_input().empty()) {
-        model_.set_send_status("Message is empty :(");
+        model_.set_send_status("Message is empty");
         update_send_content();
         return;
     }
@@ -407,7 +416,6 @@ void LoraScreen::send_current_text()
         append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, LoraMessageDelivery::PENDING);
         model_.complete_send();
         refresh_lora_info(false);
-        settle_pending_transmit();
         render_current_view();
     } else {
         model_.set_send_status("Send failed");
@@ -418,6 +426,7 @@ void LoraScreen::send_current_text()
 void LoraScreen::on_poll_timer()
 {
     if (!app_active_ || !page_root_) return;
+    if (model_.view() == LoraView::SEND) update_send_cursor();
     if (initialization_pending_) {
         (void)consume_lora_initialization();
         return;
