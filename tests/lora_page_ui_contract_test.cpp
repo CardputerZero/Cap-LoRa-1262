@@ -60,7 +60,7 @@ constexpr unsigned kReceivingColor = 0x69AD80;
 constexpr std::array<std::string_view, 21> kRequiredTexts = {
     "No messages yet", "Type anything to send", "Initializing LoRa...", "LoRa unavailable; see Info",
     "Messages", "LoRa Info", "CLIENT", "DEVICE", "RSSI", "SNR", "LINK", "New Message",
-    "ESC: Cancel", "Enter: Send", "LoRa is still initializing", "LoRa unavailable", "Message is empty :(",
+    "ESC: Cancel", "Enter: Send", "LoRa is still initializing", "LoRa unavailable", "Message is empty",
     "Send failed", "Unavailable", "Link configuration unavailable", "No diagnostics",
 };
 

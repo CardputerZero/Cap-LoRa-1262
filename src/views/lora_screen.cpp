@@ -315,6 +315,16 @@ bool LoraScreen::handle_send_key(uint32_t key)
 {
     if (key == LV_KEY_ESC) {
         cancel_send();
+    } else if (key == LV_KEY_LEFT) {
+        if (model_.move_cursor(-1)) update_send_content();
+    } else if (key == LV_KEY_RIGHT) {
+        if (model_.move_cursor(1)) update_send_content();
+    } else if (key == LV_KEY_UP) {
+        move_send_cursor_vertical(-1);
+        update_send_content();
+    } else if (key == LV_KEY_DOWN) {
+        move_send_cursor_vertical(1);
+        update_send_content();
     } else if (key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         model_.erase_character();
         update_send_content();
@@ -390,7 +400,7 @@ void LoraScreen::send_current_text()
         return;
     }
     if (model_.tx_input().empty()) {
-        model_.set_send_status("Message is empty :(");
+        model_.set_send_status("Message is empty");
         update_send_content();
         return;
     }
@@ -411,6 +421,7 @@ void LoraScreen::send_current_text()
 void LoraScreen::on_poll_timer()
 {
     if (!app_active_ || !page_root_) return;
+    if (model_.view() == LoraView::SEND) update_send_cursor();
     if (initialization_pending_) {
         (void)consume_lora_initialization();
         return;

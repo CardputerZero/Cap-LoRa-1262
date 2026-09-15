@@ -17,6 +17,9 @@ constexpr lv_coord_t kMessageTitleShownY  = -8;
 constexpr lv_coord_t kMessageTitleHiddenY = -29;
 constexpr lv_coord_t kBubbleTailWidth     = 6;
 constexpr lv_coord_t kBubbleTailDrop      = 3;
+constexpr lv_coord_t kSendCursorWidth     = 2;
+constexpr lv_coord_t kSendCursorHeight    = 17;
+constexpr uint32_t kSendCursorBlinkMs     = 500;
 
 static const char *safe_text(const char *text, const char *fallback = "")
 {
@@ -160,12 +163,34 @@ void LoraScreen::update_info_content()
 void LoraScreen::update_send_content()
 {
     if (!send_input_label_ || !send_status_label_) return;
-    std::string display = model_.tx_input() + "|";
-    lv_label_set_text(send_input_label_, display.c_str());
+    lv_label_set_text(send_input_label_, model_.tx_input().c_str());
     lv_obj_set_style_text_color(send_input_label_, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
     bool has_status = !model_.send_status().empty();
     lv_label_set_text(send_status_label_, has_status ? model_.send_status().c_str() : "");
     set_visible(send_status_label_, has_status);
+    update_send_cursor();
+}
+
+void LoraScreen::update_send_cursor()
+{
+    if (!send_cursor_label_ || !send_input_label_) return;
+    lv_point_t position{};
+    lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
+    lv_obj_set_pos(send_cursor_label_, lv_obj_get_x(send_input_label_) + position.x,
+                   lv_obj_get_y(send_input_label_) + position.y);
+    const bool visible = model_.view() == LoraView::SEND &&
+                         (lv_tick_get() / lora_app_detail::kSendCursorBlinkMs) % 2 == 0;
+    set_visible(send_cursor_label_, visible);
+}
+
+void LoraScreen::move_send_cursor_vertical(int direction)
+{
+    if (!send_input_label_ || direction == 0) return;
+    lv_point_t position{};
+    lv_label_get_letter_pos(send_input_label_, model_.cursor_position(), &position);
+    position.y += direction * lv_font_get_line_height(lv_obj_get_style_text_font(send_input_label_, LV_PART_MAIN));
+    const uint32_t target = lv_label_get_letter_on(send_input_label_, &position, false);
+    if (target != model_.cursor_position()) model_.set_cursor_position(target);
 }
 
 void LoraScreen::scroll_to_latest(lv_anim_enable_t animation)
@@ -422,6 +447,9 @@ void LoraScreen::create_send_view()
     if (send_input_bubble_) lv_obj_align(send_input_bubble_, LV_ALIGN_CENTER, 0, -12);
     send_input_label_  = make_label(send_input_bubble_, "", 10, 8, 266, 64, &lv_font_montserrat_14,
                                     lv_color_hex(0xFFFFFF), LV_TEXT_ALIGN_LEFT);
+    send_cursor_label_ = make_panel(send_input_bubble_, 10, 8, lora_app_detail::kSendCursorWidth,
+                                    lora_app_detail::kSendCursorHeight,
+                                    lv_color_hex(0x153E8A), LV_OPA_COVER, 0);
     send_status_label_ = make_label(send_input_bubble_, "", 10, 54, 266, 16, &lv_font_montserrat_14,
                                     lv_color_hex(0xFED40D), LV_TEXT_ALIGN_RIGHT);
     set_visible(send_status_label_, false);

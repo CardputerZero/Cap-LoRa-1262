@@ -83,6 +83,7 @@ private:
     lv_obj_t *send_view_                = nullptr;
     lv_obj_t *send_input_bubble_        = nullptr;
     lv_obj_t *send_input_label_         = nullptr;
+    lv_obj_t *send_cursor_label_        = nullptr;
     lv_obj_t *send_status_label_        = nullptr;
     lv_obj_t *send_cancel_button_       = nullptr;
     lv_obj_t *send_confirm_button_      = nullptr;
@@ -127,6 +128,8 @@ private:
     void update_page_indicator();
     void update_info_content();
     void update_send_content();
+    void update_send_cursor();
+    void move_send_cursor_vertical(int direction);
     void scroll_to_latest(lv_anim_enable_t animation);
     void schedule_message_title_dismissal();
     void dismiss_message_title();
