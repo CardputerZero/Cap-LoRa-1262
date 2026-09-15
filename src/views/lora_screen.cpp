@@ -409,7 +409,6 @@ void LoraScreen::send_current_text()
         append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, LoraMessageDelivery::PENDING);
         model_.complete_send();
         refresh_lora_info(false);
-        settle_pending_transmit();
         render_current_view();
     } else {
         model_.set_send_status("Send failed");
