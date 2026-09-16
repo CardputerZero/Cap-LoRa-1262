@@ -65,7 +65,7 @@ Set `SPDLOG_LEVEL=debug` when running manually to collect the same diagnostics.
 Run the SDL build with:
 
 ```bash
-LV_SDL_ZOOM=2 ./dist/sdl/M5CardputerZero-Cap-LoRa-1262
+LV_SDL_ZOOM=2 ./dist/sdl/Cap-LoRa-1262
 ```
 
 Key controls:

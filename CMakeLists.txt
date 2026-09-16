@@ -4,7 +4,7 @@ project(M5CardputerZeroCapLoRa1262 VERSION 0.1.2 LANGUAGES C CXX ASM)
 
 option(CAP_LORA_USE_SDL "Use LVGL's SDL backend for desktop development" ON)
 option(BUILD_TESTING "Build Cap-LoRa-1262 tests" OFF)
-set(CAP_LORA_BIN_NAME "M5CardputerZero-Cap-LoRa-1262" CACHE STRING "Output executable name")
+set(CAP_LORA_BIN_NAME "Cap-LoRa-1262" CACHE STRING "Output executable name")
 set(CAP_LORA_DEPS_DIR "${CMAKE_CURRENT_LIST_DIR}/dependencies" CACHE PATH "Third-party source directory")
 
 if(CAP_LORA_USE_SDL)

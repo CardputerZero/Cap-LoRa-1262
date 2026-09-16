@@ -54,7 +54,7 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          cp dist/M5CardputerZero-Cap-LoRa-1262 release-assets/
+          cp dist/Cap-LoRa-1262 release-assets/
           cp dist/*.deb release-assets/
           ls -lh release-assets
 

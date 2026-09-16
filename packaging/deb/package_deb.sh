@@ -13,7 +13,7 @@ PARALLEL="${PARALLEL:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}"
 BUILD_DIR="${BUILD_DIR:-${ROOT_DIR}/build/package}"
 STAGE_DIR="${STAGE_DIR:-${ROOT_DIR}/build/deb-root}"
 DIST_DIR="${DIST_DIR:-${ROOT_DIR}/dist}"
-BIN_NAME="M5CardputerZero-Cap-LoRa-1262"
+BIN_NAME="Cap-LoRa-1262"
 # Keep package-owned files separate from APPLaunch. The launcher scans this
 # fixed directory for dynamic .desktop entries, while the binary's device
 # resource root is fixed to INSTALL_ROOT by CMake.
@@ -203,6 +203,7 @@ cat >"${STAGE_DIR}/DEBIAN/postinst" <<EOF
 #!/bin/sh
 set -eu
 if [ "\${1:-}" = configure ]; then
+    rm -f /usr/share/Cap-LoRa-1262/bin/M5CardputerZero-Cap-LoRa-1262
     rm -f /usr/share/APPLaunch/bin/${BIN_NAME}
     rm -f /usr/share/Cap-LoRa-1262/share/images/cap-lora-1262.png
     rm -f /etc/sudoers.d/m5cardputerzero-cap-lora-1262
