@@ -18,7 +18,7 @@
 namespace lora_nickname_store {
 namespace {
 
-constexpr char kConfigDirectoryName[] = "M5CardputerZero-Cap-LoRa-1262";
+constexpr char kConfigDirectoryName[] = "Cap-LoRa-1262";
 constexpr char kNicknameFileName[]     = "nickname";
 
 struct UserConfigLocation {
