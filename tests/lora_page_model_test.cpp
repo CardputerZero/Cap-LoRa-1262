@@ -113,8 +113,29 @@ int main()
     CHECK(model.insert_text("copied"));
     CHECK(model.tx_input() == "copied");
     const std::string oversized_paste(LoraPageModel::TX_INPUT_LIMIT, 'p');
-    CHECK(!model.insert_text(oversized_paste));
-    CHECK(model.tx_input() == "copied");
+    CHECK(model.insert_text(oversized_paste));
+    CHECK(model.tx_input().size() == LoraPageModel::TX_INPUT_LIMIT);
+    CHECK(model.tx_input().substr(0, 6) == "copied");
+    CHECK(model.send_status().empty());
+    model.cancel_editor();
+    model.begin_send();
+    const std::string maximum_paste(LoraPageModel::TX_INPUT_LIMIT, 'p');
+    CHECK(model.insert_text(maximum_paste));
+    CHECK(model.tx_input() == maximum_paste);
+    CHECK(!model.insert_text("p"));
+    CHECK(model.tx_input() == maximum_paste);
+
+    const std::string quoted_message(LoraPageModel::TX_INPUT_LIMIT, 'q');
+    const std::string maximum_reply(lora_chat_protocol::kMaxReplyMessageBytes, 'r');
+    model.begin_reply(quoted_message, "Alice");
+    CHECK(model.reply_to() == quoted_message);
+    CHECK(model.reply_to_sender() == "Alice");
+    CHECK(model.insert_text(maximum_input));
+    CHECK(model.reply_to() == quoted_message);
+    CHECK(model.reply_to_sender() == "Alice");
+    CHECK(model.tx_input() == maximum_input.substr(0, lora_chat_protocol::kMaxReplyMessageBytes));
+    CHECK(!model.append_character('x'));
+    CHECK(model.tx_input() == maximum_input.substr(0, lora_chat_protocol::kMaxReplyMessageBytes));
     CHECK(model.send_status() == "Message is too long");
 
     model.set_send_status("sending");
@@ -122,6 +143,8 @@ int main()
     CHECK(model.view() == LoraView::MESSAGES);
     CHECK(model.tx_input().empty());
     CHECK(model.send_status().empty());
+    CHECK(model.reply_to().empty());
+    CHECK(model.reply_to_sender().empty());
 
     model.append_message("", false, -81.0f, 7.5f);
     CHECK(model.messages().back().text == "<empty>");
@@ -144,11 +167,35 @@ int main()
     CHECK(model.selected_message() && model.selected_message()->text == "65");
     CHECK(model.select_message(1));
     CHECK(model.selected_message() && model.selected_message()->text == "66");
-    model.append_message("67", false, -70.0f, 8.0f);
+    model.append_message("67", false, -70.0f, 8.0f, {}, LoraMessageDelivery::RECEIVED,
+                         quoted_message, "Alice");
+    CHECK(model.messages().back().reply_to == quoted_message);
+    CHECK(model.messages().back().reply_to_sender == "Alice");
+    CHECK(model.find_message(lora_chat_protocol::message_id("67")) == &model.messages().back());
     CHECK(model.selected_message() && model.selected_message()->text == "66");
     CHECK(model.clear_message_selection());
     CHECK(!model.selected_message());
     CHECK(!model.clear_message_selection());
+
+    LoraPageModel delivery_model;
+    delivery_model.reset(true);
+    delivery_model.append_message("sending", true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING);
+    CHECK(delivery_model.select_message(-1));
+    CHECK(delivery_model.selected_message() && delivery_model.selected_message()->text == "sending");
+    delivery_model.append_message("failed", true, 0.0f, 0.0f, {}, LoraMessageDelivery::FAILED);
+    CHECK(delivery_model.clear_message_selection());
+    CHECK(delivery_model.select_message(-1));
+    CHECK(delivery_model.selected_message() && delivery_model.selected_message()->text == "failed");
+    delivery_model.append_message("received", false, -70.0f, 8.0f);
+    delivery_model.append_message("sending 2", true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING);
+    delivery_model.append_message("sent", true, 0.0f, 0.0f, {}, LoraMessageDelivery::SENT);
+    CHECK(delivery_model.clear_message_selection());
+    CHECK(delivery_model.select_message(-1));
+    CHECK(delivery_model.selected_message() && delivery_model.selected_message()->text == "sent");
+    CHECK(delivery_model.select_message(-1));
+    CHECK(delivery_model.selected_message() && delivery_model.selected_message()->text == "sending 2");
+    CHECK(delivery_model.select_message(1));
+    CHECK(delivery_model.selected_message() && delivery_model.selected_message()->text == "sent");
 
     const std::string named = lora_chat_protocol::encode("hello", "Peer");
     CHECK(named.size() == 10);
@@ -163,4 +210,16 @@ int main()
     const auto decoded_maximum = lora_chat_protocol::decode(lora_chat_protocol::encode(maximum_message, maximum_name));
     CHECK(decoded_maximum.message == maximum_message);
     CHECK(decoded_maximum.nickname == maximum_name);
+    CHECK(!decoded_maximum.has_reply);
+
+    const std::string maximum_reply_payload =
+        lora_chat_protocol::encode(maximum_reply, maximum_name, maximum_message);
+    CHECK(maximum_reply_payload.size() == lora_chat_protocol::kRadioPayloadBytes);
+    const auto decoded_reply = lora_chat_protocol::decode(maximum_reply_payload);
+    CHECK(decoded_reply.message == maximum_reply);
+    CHECK(decoded_reply.nickname == maximum_name);
+    CHECK(decoded_reply.has_reply);
+    CHECK(decoded_reply.reply_id == lora_chat_protocol::message_id(maximum_message));
+    CHECK(lora_chat_protocol::encode(std::string(lora_chat_protocol::kMaxReplyMessageBytes + 1, 'x'),
+                                     maximum_name, maximum_message).empty());
 }

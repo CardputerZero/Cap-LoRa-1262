@@ -45,7 +45,9 @@ constexpr lv_coord_t kInfoValueWidth       = kInfoTableWidth - kInfoLabelWidth;
 constexpr lv_coord_t kInfoRowHeight        = 18;
 constexpr lv_coord_t kInfoScrollbarWidth   = 4;
 constexpr uint32_t kInfoDividerColor       = 0x4E5157;
+constexpr uint32_t kClipboardNoticeColor   = 0x5BA7FF;
 constexpr char kNicknameRecolorTag[]       = "#6B4423 ";
+constexpr char kReplyNicknameRecolorTag[]  = "#8B2E2E ";
 constexpr lv_coord_t kNicknameEditorX      = 8;
 constexpr lv_coord_t kNicknameEditorY      = 87;
 constexpr lv_coord_t kNicknameEditorWidth  = 304;
@@ -301,7 +303,7 @@ void LoraScreen::configure_editor_layout()
     lv_obj_set_size(send_view_, lora_app_detail::kScreenWidth, lora_app_detail::kScreenHeight);
     lv_obj_set_style_bg_opa(send_view_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_radius(send_view_, 0, LV_PART_MAIN | LV_STATE_DEFAULT);
-    lv_label_set_text(send_title_label_, "New Message");
+    lv_label_set_text(send_title_label_, model_.reply_to().empty() ? "New Message" : "Reply Message");
     lv_obj_set_pos(send_title_label_, 0, 0);
     lv_obj_set_size(send_title_label_, 320, 18);
     lv_obj_set_style_text_font(send_title_label_, &lv_font_montserrat_14, LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -329,8 +331,12 @@ void LoraScreen::update_send_content()
     configure_editor_layout();
     lv_label_set_text(send_input_label_, model_.tx_input().c_str());
     lv_obj_set_style_text_color(send_input_label_, lv_color_hex(0xFFFFFF), LV_PART_MAIN | LV_STATE_DEFAULT);
-    bool has_status = !model_.send_status().empty();
-    lv_label_set_text(send_status_label_, has_status ? model_.send_status().c_str() : "");
+    const bool pasted = clipboard_notice_ == ClipboardNotice::Pasted ||
+                        clipboard_notice_ == ClipboardNotice::PastedTruncated;
+    const bool has_status = pasted || !model_.send_status().empty();
+    lv_label_set_text(send_status_label_, clipboard_notice_ == ClipboardNotice::PastedTruncated
+                                              ? "pasted (truncated)"
+                                              : pasted ? "pasted" : model_.send_status().c_str());
     set_visible(send_status_label_, has_status);
     update_send_cursor();
 }
@@ -345,7 +351,9 @@ void LoraScreen::update_send_cursor()
     const lv_coord_t text_top = nickname ? 6 : lora_app_detail::kSendInputTextTop;
     const lv_coord_t cursor_height = nickname ? 14 : lora_app_detail::kSendCursorHeight;
     lv_obj_set_size(send_cursor_label_, lora_app_detail::kSendCursorWidth, cursor_height);
-    const lv_coord_t viewport_height = model_.send_status().empty()
+    const bool pasted = clipboard_notice_ == ClipboardNotice::Pasted ||
+                        clipboard_notice_ == ClipboardNotice::PastedTruncated;
+    const lv_coord_t viewport_height = !pasted && model_.send_status().empty()
                                            ? lora_app_detail::kSendInputTextHeight
                                            : lora_app_detail::kSendInputStatusY -
                                                  lora_app_detail::kSendInputTextTop -
@@ -403,8 +411,41 @@ void LoraScreen::cancel_message_title_animation()
     if (messages_title_) lv_anim_del(messages_title_, &LoraScreen::message_title_anim_exec_cb);
 }
 
+void LoraScreen::show_message_notice(const char *text)
+{
+    if (!messages_title_) return;
+    cancel_message_title_animation();
+    lv_point_t text_size{};
+    lv_text_get_size(&text_size, text ? text : "", &lv_font_montserrat_18, 0, 0,
+                     lora_app_detail::kScreenWidth, LV_TEXT_FLAG_NONE);
+    lv_obj_t *label = lv_obj_get_child(messages_title_, 0);
+    if (label) {
+        lv_label_set_text(label, text ? text : "");
+        lv_obj_set_pos(label, 0, 0);
+        lv_obj_set_size(label, text_size.x, text_size.y);
+        lv_obj_set_style_text_font(label, &lv_font_montserrat_18, LV_PART_MAIN | LV_STATE_DEFAULT);
+        lv_obj_set_style_text_color(label, lv_color_hex(lora_app_detail::kClipboardNoticeColor),
+                                    LV_PART_MAIN | LV_STATE_DEFAULT);
+    }
+    lv_obj_set_pos(messages_title_, (lora_app_detail::kScreenWidth - text_size.x) / 2,
+                   lora_app_detail::kContentHeight - text_size.y - 4);
+    lv_obj_set_size(messages_title_, text_size.x, text_size.y);
+    lv_obj_set_style_bg_opa(messages_title_, LV_OPA_TRANSP, LV_PART_MAIN | LV_STATE_DEFAULT);
+    lv_obj_set_style_opa(messages_title_, LV_OPA_COVER, LV_PART_MAIN | LV_STATE_DEFAULT);
+    set_visible(messages_title_, true);
+    lv_obj_move_foreground(messages_title_);
+}
+
+void LoraScreen::hide_message_notice()
+{
+    if (!messages_title_) return;
+    lv_anim_del(messages_title_, &LoraScreen::message_title_anim_exec_cb);
+    set_visible(messages_title_, false);
+}
+
 void LoraScreen::dismiss_message_title()
 {
+    if (clipboard_notice_ == ClipboardNotice::Copied || clipboard_notice_ == ClipboardNotice::Wait) return;
     if (!messages_title_ || lv_obj_has_flag(messages_title_, LV_OBJ_FLAG_HIDDEN)) return;
 
     if (message_title_timer_) {
@@ -541,6 +582,7 @@ void LoraScreen::render_current_view()
     set_visible(page_indicator_, !show_send && !show_nickname);
     if (!show_send && !show_nickname) update_page_indicator();
     if (show_messages && scroll_to_latest_pending_ && !model_.selected_message_index()) scroll_to_latest(LV_ANIM_OFF);
+    if (help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN)) lv_obj_move_foreground(help_view_);
 }
 
 void LoraScreen::create_ui()
@@ -553,6 +595,7 @@ void LoraScreen::create_ui()
     create_info_view();
     create_send_view();
     create_page_indicator();
+    create_help_view();
     lv_obj_t *persistent_children[] = {
         empty_message_label_,     empty_message_hint_label_, info_status_dot_,         info_status_label_,
         info_change_name_button_, info_stats_label_,         info_table_,              info_table_content_,
@@ -561,6 +604,23 @@ void LoraScreen::create_ui()
         page_dots_[1],            messages_title_};
     for (lv_obj_t *object : persistent_children) track_owned_handle(object);
     for (lv_obj_t *object : info_value_labels_) track_owned_handle(object);
+}
+
+void LoraScreen::create_help_view()
+{
+    help_view_ = make_panel(page_root_, 0, 0, lora_app_detail::kScreenWidth, lora_app_detail::kScreenHeight,
+                            lv_color_hex(0x000000), LV_OPA_COVER, 0);
+    if (!help_view_) return;
+    lv_obj_add_event_cb(help_view_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
+    make_label(help_view_, "esc", 8, 4, 32, 14, &lv_font_montserrat_10, lv_color_hex(0xF2C94C),
+               LV_TEXT_ALIGN_LEFT);
+    make_label(help_view_,
+               "Connect Cap LoRa-1262 to send and receive messages over LoRa, with support for group communication "
+               "between multiple devices.\n\nFeatures: nickname, message selection and replies, copy and paste, plus radio "
+               "and link details in Info.\n\nKeyboard: compose a message\nF / X / Z / C: switch between screens\n"
+               "Fn + F / X: select a message\nEnter: reply to selection\nCtrl + C / V: copy / paste",
+               8, 20, 304, 146, &lv_font_montserrat_10, lv_color_hex(0xE4E4E4), LV_TEXT_ALIGN_LEFT);
+    set_visible(help_view_, false);
 }
 
 void LoraScreen::create_messages_view()
@@ -737,6 +797,7 @@ bool LoraScreen::ui_ready() const
 void LoraScreen::detach_delete_callbacks()
 {
     lv_obj_t *objects[] = {message_list_,
+                           help_view_,
                            messages_view_,
                            empty_message_label_,
                            empty_message_hint_label_,
@@ -769,6 +830,7 @@ void LoraScreen::detach_delete_callbacks()
 void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
 {
     if (!deleted) return;
+    if (deleted == help_view_) help_view_ = nullptr;
     if (deleted == messages_title_) {
         lv_anim_del(deleted, &LoraScreen::message_title_anim_exec_cb);
         messages_title_ = nullptr;
@@ -797,6 +859,8 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
         last_message_row_ = nullptr;
     }
     if (deleted == messages_view_) {
+        if (clipboard_notice_timer_) { lv_timer_delete(clipboard_notice_timer_); clipboard_notice_timer_ = nullptr; }
+        clipboard_notice_ = ClipboardNotice::None;
         cancel_message_title_animation();
         messages_view_            = nullptr;
         message_list_             = nullptr;
@@ -816,6 +880,11 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
         info_value_labels_.fill(nullptr);
     }
     if (deleted == send_view_) {
+        if (clipboard_notice_ == ClipboardNotice::Pasted ||
+            clipboard_notice_ == ClipboardNotice::PastedTruncated) {
+            if (clipboard_notice_timer_) { lv_timer_delete(clipboard_notice_timer_); clipboard_notice_timer_ = nullptr; }
+            clipboard_notice_ = ClipboardNotice::None;
+        }
         send_view_           = nullptr;
         send_title_label_     = nullptr;
         send_input_bubble_   = nullptr;
@@ -833,6 +902,7 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
     if (active_view_ == deleted) active_view_ = nullptr;
     if (deleted == page_root_) {
         page_root_                = nullptr;
+        help_view_                = nullptr;
         messages_view_            = nullptr;
         message_list_             = nullptr;
         empty_message_label_      = nullptr;
@@ -859,6 +929,8 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
         page_dots_[1]             = nullptr;
         active_view_              = nullptr;
         app_active_               = false;
+        if (clipboard_notice_timer_) { lv_timer_delete(clipboard_notice_timer_); clipboard_notice_timer_ = nullptr; }
+        clipboard_notice_ = ClipboardNotice::None;
         cancel_message_title_animation();
         messages_title_ = nullptr;
         if (poll_timer_) { lv_timer_delete(poll_timer_); poll_timer_ = nullptr; }
@@ -903,6 +975,18 @@ lv_obj_t *LoraScreen::append_message_row(const LoraChatMessage &message, bool se
     lv_point_t text_size{};
     lv_text_get_size(&text_size, message.text.c_str(), &lv_font_montserrat_12, 0, 0, MAX_TEXT_WIDTH, LV_TEXT_FLAG_NONE);
     int32_t content_width = text_size.x;
+    std::string reply_preview;
+    std::string rendered_reply_preview;
+    if (!message.reply_to.empty()) {
+        const std::string sender = message.reply_to_sender.empty() ? "Unknown" : message.reply_to_sender;
+        reply_preview = std::string{"Reply: "} + sender + ' ' + message.reply_to;
+        rendered_reply_preview = std::string{"Reply: "} + lora_app_detail::kReplyNicknameRecolorTag + sender + "# " +
+                                 message.reply_to;
+        lv_point_t reply_size{};
+        lv_text_get_size(&reply_size, reply_preview.c_str(), &lv_font_montserrat_10, 0, 0, MAX_TEXT_WIDTH,
+                         LV_TEXT_FLAG_NONE);
+        content_width = std::max(content_width, reply_size.x);
+    }
     if (metadata[0]) {
         lv_point_t metadata_size{};
         lv_text_get_size(&metadata_size, metadata, &lv_font_montserrat_10, 0, 0, MAX_TEXT_WIDTH, LV_TEXT_FLAG_NONE);
@@ -939,6 +1023,25 @@ lv_obj_t *LoraScreen::append_message_row(const LoraChatMessage &message, bool se
     lv_obj_set_style_pad_bottom(bubble, 7, LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_pad_row(bubble, 3, LV_PART_MAIN | LV_STATE_DEFAULT);
 
+    if (!reply_preview.empty()) {
+        const lv_coord_t quote_width = bubble_width - HORIZONTAL_PADDING * 2;
+        const lv_coord_t quote_text_width = quote_width - 10;
+        lv_point_t quote_text_size{};
+        lv_text_get_size(&quote_text_size, reply_preview.c_str(), &lv_font_montserrat_10, 0, 0, quote_text_width,
+                         LV_TEXT_FLAG_NONE);
+        const lv_coord_t quote_height = quote_text_size.y + 6;
+        const lv_color_t quote_color = message.outgoing ? lv_color_hex(0x2D6B46) : lv_color_hex(0xA9A9A9);
+        lv_obj_t *quote = make_panel(bubble, 0, 0, quote_width, quote_height, quote_color, LV_OPA_COVER, 3);
+        if (quote) {
+            make_panel(quote, 0, 2, 3, quote_height - 4,
+                       message.outgoing ? lv_color_hex(0xB9F2CE) : lv_color_hex(0x555555), LV_OPA_COVER, 1);
+            lv_obj_t *reply_label =
+                make_label(quote, rendered_reply_preview.c_str(), 8, 3, quote_text_width, quote_text_size.y,
+                           &lv_font_montserrat_10,
+                           message.outgoing ? lv_color_hex(0xE7FFF0) : lv_color_hex(0x252525), LV_TEXT_ALIGN_LEFT);
+            if (reply_label) lv_label_set_recolor(reply_label, true);
+        }
+    }
     make_label(bubble, message.text.c_str(), 0, 0, bubble_width - HORIZONTAL_PADDING * 2, LV_SIZE_CONTENT,
                &lv_font_montserrat_12, lv_color_hex(0x000000), LV_TEXT_ALIGN_LEFT);
     if (metadata[0]) {

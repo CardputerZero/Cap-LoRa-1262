@@ -31,6 +31,7 @@ struct LoraInitializationState {
 constexpr uint32_t kPollIntervalMs   = 300;
 constexpr int32_t kMessageScrollStep = 36;
 constexpr uint32_t kInitRetryIntervalMs = 3000;
+constexpr uint32_t kClipboardNoticeMs = 1000;
 
 static bool is_printable_ascii(uint32_t key)
 {
@@ -130,6 +131,7 @@ void LoraScreen::onExit()
     spdlog::info("LoraScreen: onExit begin; cancelling animations and poll timer");
     cancel_view_animations();
     cancel_message_title_animation();
+    clear_clipboard_notice();
     app_active_ = false;
     if (poll_timer_) { lv_timer_delete(poll_timer_); poll_timer_ = nullptr; }
     // Tell the worker to stop before reaping it. The worker only owns the
@@ -161,6 +163,14 @@ void LoraScreen::tick(uint32_t)
 bool LoraScreen::handleKey(uint32_t key)
 {
     if (!app_active_) return false;
+    if (help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN)) {
+        if (key == LV_KEY_ESC) hide_help();
+        return true;
+    }
+    if (key == cap_gps::keyCommandValue(cap_gps::KeyCommand::Help)) {
+        show_help();
+        return true;
+    }
     if (key == cap_gps::keyCommandValue(cap_gps::KeyCommand::Copy)) {
         copy_selected_message();
         return true;
@@ -169,10 +179,24 @@ bool LoraScreen::handleKey(uint32_t key)
         paste_clipboard();
         return true;
     }
-    if (model_.editor_mode() == LoraEditorMode::NONE && model_.view() == LoraView::MESSAGES &&
-        (key == LV_KEY_UP || key == LV_KEY_DOWN)) {
-        select_message(key == LV_KEY_UP ? -1 : 1);
-        return true;
+    if (model_.editor_mode() == LoraEditorMode::NONE && model_.view() == LoraView::MESSAGES) {
+        if (key == LV_KEY_ESC && model_.selected_message_index()) {
+            clear_message_selection();
+            return true;
+        }
+        if (key == LV_KEY_UP || key == LV_KEY_DOWN) {
+            select_message(key == LV_KEY_UP ? -1 : 1);
+            return true;
+        }
+        if (model_.selected_message_index() && key == LV_KEY_ENTER) {
+            open_reply_view();
+            return true;
+        }
+        if (model_.selected_message_index()) {
+            // A selected message is modal: arbitrary keys must not open a
+            // fresh compose editor until the selection is cleared.
+            return true;
+        }
     }
     const LoraView input_view = model_.editor_mode() == LoraEditorMode::NONE ? model_.view() : LoraView::SEND;
     return handle_key(lora_app_detail::normalize_lora_key(key, input_view));
@@ -265,7 +289,7 @@ bool LoraScreen::refresh_lora_info(bool poll)
 }
 
 void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr, std::string sender_name,
-                                     LoraMessageDelivery delivery)
+                                     LoraMessageDelivery delivery, std::string reply_to, std::string reply_to_sender)
 {
     if (!message_list_) return;
     // A new bubble should never sit underneath the temporary Messages HUD.
@@ -277,7 +301,8 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         lv_obj_t *oldest_row = lv_obj_get_child(message_list_, 0);
         if (oldest_row) lv_obj_delete(oldest_row);
     }
-    model_.append_message(text ? text : "", outgoing, rssi, snr, std::move(sender_name), delivery);
+    model_.append_message(text ? text : "", outgoing, rssi, snr, std::move(sender_name), delivery,
+                          std::move(reply_to), std::move(reply_to_sender));
     last_message_row_ = append_message_row(model_.messages().back());
     set_visible(empty_message_label_, false);
     set_visible(empty_message_hint_label_, false);
@@ -331,6 +356,20 @@ void LoraScreen::open_send_view(uint32_t first_key)
     render_current_view();
 }
 
+void LoraScreen::open_reply_view()
+{
+    const LoraChatMessage *message = model_.selected_message();
+    if (!message) return;
+    if (message->delivery != LoraMessageDelivery::RECEIVED && message->delivery != LoraMessageDelivery::SENT) {
+        show_clipboard_notice(ClipboardNotice::Wait);
+        return;
+    }
+    std::string sender = message->outgoing ? model_.nickname() : message->sender_name;
+    if (sender.empty()) sender = "Unknown";
+    model_.begin_reply(message->text, std::move(sender));
+    render_current_view();
+}
+
 void LoraScreen::scroll_messages(int32_t amount)
 {
     dismiss_message_title();
@@ -347,19 +386,73 @@ void LoraScreen::copy_selected_message()
 {
     if (model_.view() != LoraView::MESSAGES || model_.editor_mode() != LoraEditorMode::NONE) return;
     const LoraChatMessage *message = model_.selected_message();
-    if (message) clipboard_text_ = message->text;
+    if (message) {
+        clipboard_text_ = message->text;
+        show_clipboard_notice(ClipboardNotice::Copied);
+    }
 }
 
 void LoraScreen::paste_clipboard()
 {
     if (model_.editor_mode() != LoraEditorMode::MESSAGE || clipboard_text_.empty()) return;
-    (void)model_.insert_text(clipboard_text_);
+    clear_clipboard_notice();
+    const size_t input_limit = model_.reply_to().empty() ? lora_chat_protocol::kMaxMessageBytes
+                                                         : lora_chat_protocol::kMaxReplyMessageBytes;
+    const size_t remaining = model_.tx_input().size() < input_limit ? input_limit - model_.tx_input().size() : 0;
+    const bool truncated = clipboard_text_.size() > remaining;
+    if (model_.insert_text(clipboard_text_))
+        show_clipboard_notice(truncated ? ClipboardNotice::PastedTruncated : ClipboardNotice::Pasted);
     update_send_content();
+}
+
+void LoraScreen::show_clipboard_notice(ClipboardNotice notice)
+{
+    clear_clipboard_notice();
+    clipboard_notice_ = notice;
+    if (notice == ClipboardNotice::Copied || notice == ClipboardNotice::Wait) {
+        show_message_notice(notice == ClipboardNotice::Copied ? "copied" : "wait");
+    } else if (notice == ClipboardNotice::Pasted || notice == ClipboardNotice::PastedTruncated) {
+        update_send_content();
+    }
+    clipboard_notice_timer_ =
+        lv_timer_create(&LoraScreen::static_clipboard_notice_timer_cb, lora_app_detail::kClipboardNoticeMs, this);
+    if (clipboard_notice_timer_)
+        lv_timer_set_repeat_count(clipboard_notice_timer_, 1);
+    else
+        clear_clipboard_notice();
+}
+
+void LoraScreen::clear_clipboard_notice()
+{
+    if (clipboard_notice_timer_) {
+        lv_timer_delete(clipboard_notice_timer_);
+        clipboard_notice_timer_ = nullptr;
+    }
+    const ClipboardNotice notice = clipboard_notice_;
+    clipboard_notice_ = ClipboardNotice::None;
+    if (notice == ClipboardNotice::Copied || notice == ClipboardNotice::Wait) {
+        hide_message_notice();
+    } else if (notice == ClipboardNotice::Pasted || notice == ClipboardNotice::PastedTruncated) {
+        update_send_content();
+    }
 }
 
 void LoraScreen::clear_message_selection()
 {
     if (model_.clear_message_selection()) rebuild_message_list();
+}
+
+void LoraScreen::show_help()
+{
+    if (!help_view_) return;
+    clear_clipboard_notice();
+    set_visible(help_view_, true);
+    lv_obj_move_foreground(help_view_);
+}
+
+void LoraScreen::hide_help()
+{
+    set_visible(help_view_, false);
 }
 
 void LoraScreen::scroll_info(int32_t amount)
@@ -375,6 +468,7 @@ void LoraScreen::open_nickname_editor()
 
 void LoraScreen::cancel_editor()
 {
+    clear_clipboard_notice();
     model_.cancel_editor();
     render_current_view();
 }
@@ -486,6 +580,7 @@ void LoraScreen::append_text_key(uint32_t key)
 
 void LoraScreen::send_current_text()
 {
+    clear_clipboard_notice();
     if (initialization_pending_) {
         model_.set_send_status("LoRa is still initializing");
         update_send_content();
@@ -502,11 +597,14 @@ void LoraScreen::send_current_text()
         return;
     }
     std::string sent_text(model_.tx_input());
-    const std::string payload = lora_chat_protocol::encode(sent_text, model_.nickname());
+    const std::string reply_to(model_.reply_to());
+    const std::string reply_to_sender(model_.reply_to_sender());
+    const std::string payload = lora_chat_protocol::encode(sent_text, model_.nickname(), reply_to);
     if (lora_device_ && !payload.empty() && lora_device_->exec_send(payload.c_str())) {
         pending_tx_text_ = payload;
         clear_message_selection();
-        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING);
+        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING,
+                            reply_to, reply_to_sender);
         model_.complete_send();
         refresh_lora_info(false);
         render_current_view();
@@ -538,8 +636,22 @@ void LoraScreen::on_poll_timer()
     settle_pending_transmit();
     if (lora_info_.rx_event) {
         const auto received = lora_chat_protocol::decode(lora_info_.last_rx);
+        std::string reply_to;
+        std::string reply_to_sender;
+        if (received.has_reply) {
+            const LoraChatMessage *target = model_.find_message(received.reply_id);
+            if (target) {
+                reply_to = target->text;
+                reply_to_sender = target->outgoing ? model_.nickname() : target->sender_name;
+                if (reply_to_sender.empty()) reply_to_sender = "Unknown";
+            } else {
+                reply_to = "Original message unavailable";
+                reply_to_sender = "Unknown";
+            }
+        }
         append_chat_message(received.message.c_str(), false, lora_info_.rssi, lora_info_.snr,
-                            std::move(received.nickname));
+                            std::move(received.nickname), LoraMessageDelivery::RECEIVED,
+                            std::move(reply_to), std::move(reply_to_sender));
     }
     if (model_.view() == LoraView::INFO) update_info_content();
 }
@@ -612,6 +724,18 @@ void LoraScreen::static_message_title_timer_cb(lv_timer_t *timer) noexcept
     self->message_title_timer_ = nullptr;
     try {
         self->dismiss_message_title();
+    } catch (...) {
+        self->app_active_ = false;
+    }
+}
+
+void LoraScreen::static_clipboard_notice_timer_cb(lv_timer_t *timer) noexcept
+{
+    auto *self = timer ? static_cast<LoraScreen *>(lv_timer_get_user_data(timer)) : nullptr;
+    if (!self || self->clipboard_notice_timer_ != timer) return;
+    self->clipboard_notice_timer_ = nullptr;
+    try {
+        self->clear_clipboard_notice();
     } catch (...) {
         self->app_active_ = false;
     }

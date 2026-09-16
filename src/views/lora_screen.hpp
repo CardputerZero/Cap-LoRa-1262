@@ -53,6 +53,8 @@ public:
     bool active() const noexcept { return app_active_; }
 
 private:
+    enum class ClipboardNotice : uint8_t { None, Copied, Pasted, PastedTruncated, Wait };
+
     enum class InfoRowId : uint8_t {
         Nickname,
         Rssi,
@@ -91,7 +93,10 @@ private:
 
     lv_timer_t *poll_timer_ = nullptr;
     lv_timer_t *message_title_timer_    = nullptr;
+    lv_timer_t *clipboard_notice_timer_ = nullptr;
+    ClipboardNotice clipboard_notice_   = ClipboardNotice::None;
     lv_obj_t *page_root_                = nullptr;
+    lv_obj_t *help_view_                = nullptr;
     lv_obj_t *messages_view_            = nullptr;
     lv_obj_t *message_list_             = nullptr;
     lv_obj_t *messages_title_           = nullptr;
@@ -135,6 +140,7 @@ private:
     static void bubble_tail_draw_cb(lv_event_t *event) noexcept;
 
     void create_ui();
+    void create_help_view();
     void create_messages_view();
     void create_info_view();
     void create_send_view();
@@ -162,6 +168,8 @@ private:
     void schedule_message_title_dismissal();
     void dismiss_message_title();
     void cancel_message_title_animation();
+    void show_message_notice(const char *text);
+    void hide_message_notice();
     static void message_title_anim_exec_cb(void *object, int32_t y) noexcept;
     static void hide_message_title_after_anim_cb(lv_anim_t *animation) noexcept;
     static void view_opa_exec_cb(void *object, int32_t opacity) noexcept;
@@ -175,15 +183,21 @@ private:
     lv_obj_t *append_message_row(const LoraChatMessage &message, bool selected = false);
 
     void append_chat_message(const char *text, bool outgoing, float rssi, float snr, std::string sender_name = {},
-                             LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED);
+                             LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED, std::string reply_to = {},
+                             std::string reply_to_sender = {});
     void rebuild_message_list();
     void settle_pending_transmit();
     void open_send_view(uint32_t first_key);
+    void open_reply_view();
     void scroll_messages(int32_t amount);
     void select_message(int direction);
     void copy_selected_message();
     void paste_clipboard();
+    void show_clipboard_notice(ClipboardNotice notice);
+    void clear_clipboard_notice();
     void clear_message_selection();
+    void show_help();
+    void hide_help();
     void scroll_info(int32_t amount);
     void open_nickname_editor();
     void cancel_editor();
@@ -199,4 +213,5 @@ private:
     static void static_nickname_button_cb(lv_event_t *event) noexcept;
     static void static_poll_timer_cb(lv_timer_t *timer) noexcept;
     static void static_message_title_timer_cb(lv_timer_t *timer) noexcept;
+    static void static_clipboard_notice_timer_cb(lv_timer_t *timer) noexcept;
 };

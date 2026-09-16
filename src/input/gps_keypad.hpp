@@ -12,6 +12,7 @@ namespace cap_gps {
 enum class KeyCommand : uint32_t {
     Copy  = 0x110000,
     Paste = 0x110001,
+    Help  = 0x110002,
 };
 
 constexpr uint32_t keyCommandValue(KeyCommand command) noexcept
