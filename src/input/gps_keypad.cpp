@@ -197,6 +197,8 @@ void GpsKeypad::close()
     _last_key            = 0;
     _left_shift_pressed  = false;
     _right_shift_pressed = false;
+    _left_ctrl_pressed   = false;
+    _right_ctrl_pressed  = false;
 
     if (_indev) {
         lv_indev_delete(_indev);
@@ -300,9 +302,24 @@ void GpsKeypad::pushKeyEvent(uint16_t code, int32_t value)
         }
         return;
     }
+    if (code == KEY_LEFTCTRL || code == KEY_RIGHTCTRL) {
+        if (code == KEY_LEFTCTRL) {
+            _left_ctrl_pressed = value == 1;
+        } else {
+            _right_ctrl_pressed = value == 1;
+        }
+        return;
+    }
 #endif
 
-    const uint32_t key = translateKey(code);
+    uint32_t key = translateKey(code);
+#if !LV_USE_SDL && defined(__linux__)
+    const bool control_pressed = _left_ctrl_pressed || _right_ctrl_pressed;
+    if (control_pressed && code == KEY_C)
+        key = keyCommandValue(KeyCommand::Copy);
+    else if (control_pressed && code == KEY_V)
+        key = keyCommandValue(KeyCommand::Paste);
+#endif
     if (key == 0) {
 #if !LV_USE_SDL && defined(__linux__)
         if (inputDebugEnabled()) {
@@ -353,6 +370,8 @@ uint32_t GpsKeypad::translateKey(uint16_t code) const
             return LV_KEY_HOME;
         case KEY_END:
             return LV_KEY_END;
+        case KEY_HELP:
+            return keyCommandValue(KeyCommand::Help);
         case KEY_UP:
             return LV_KEY_UP;
         case KEY_DOWN:

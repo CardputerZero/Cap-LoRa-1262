@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(M5CardputerZeroCapLoRa1262 VERSION 0.1.1 LANGUAGES C CXX ASM)
+project(M5CardputerZeroCapLoRa1262 VERSION 0.1.2 LANGUAGES C CXX ASM)
 
 option(CAP_LORA_USE_SDL "Use LVGL's SDL backend for desktop development" ON)
 option(BUILD_TESTING "Build Cap-LoRa-1262 tests" OFF)
-set(CAP_LORA_BIN_NAME "M5CardputerZero-Cap-LoRa-1262" CACHE STRING "Output executable name")
+set(CAP_LORA_BIN_NAME "Cap-LoRa-1262" CACHE STRING "Output executable name")
 set(CAP_LORA_DEPS_DIR "${CMAKE_CURRENT_LIST_DIR}/dependencies" CACHE PATH "Third-party source directory")
 
 if(CAP_LORA_USE_SDL)
@@ -249,6 +249,7 @@ set(CAP_LORA_APP_CPP
     "${CAP_LORA_SRC_DIR}/core/lora_app.cpp"
     "${CAP_LORA_SRC_DIR}/input/gps_keypad.cpp"
     "${CAP_LORA_SRC_DIR}/models/lora_page_model.cpp"
+    "${CAP_LORA_SRC_DIR}/models/lora_nickname_store.cpp"
     "${CAP_LORA_SRC_DIR}/views/lora_screen.cpp"
     "${CAP_LORA_SRC_DIR}/views/lora_screen_render.cpp"
     "${CAP_LORA_SRC_DIR}/hal/gps_lvgl_hal.cpp"
@@ -317,7 +318,9 @@ endif()
 if(CAP_LORA_USE_SDL)
     target_link_libraries(${CAP_LORA_BIN_NAME} PRIVATE cap_lora_pigweed_headers)
 endif()
-target_compile_definitions(${CAP_LORA_BIN_NAME} PRIVATE CAP_LORA_USE_SDL=$<BOOL:${CAP_LORA_USE_SDL}>)
+target_compile_definitions(${CAP_LORA_BIN_NAME} PRIVATE
+    CAP_LORA_APP_VERSION="${PROJECT_VERSION}"
+    CAP_LORA_USE_SDL=$<BOOL:${CAP_LORA_USE_SDL}>)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(${CAP_LORA_BIN_NAME} PRIVATE -Wall -Wextra -Wpedantic)
 endif()

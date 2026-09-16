@@ -50,6 +50,8 @@ grep -Fq 'Exec=@CAP_LORA_EXEC_PATH@' \
     "${ROOT_DIR}/packaging/deb/cap-lora-1262.desktop.in"
 grep -Fq 'Icon=cap-lora-1262.png' \
     "${ROOT_DIR}/packaging/deb/cap-lora-1262.desktop.in"
+grep -Fq 'cp dist/Cap-LoRa-1262 release-assets/' \
+    "${ROOT_DIR}/.github/workflows/cp0-package.yml"
 grep -Fq 'KERNEL=="ext_5v_out"' "${ROOT_DIR}/packaging/deb/70-cap-lora-1262.rules"
 grep -Fq 'umask 022' "${PACKAGE_SCRIPT}"
 grep -Fq 'Version: ${DEBIAN_VERSION}' "${PACKAGE_SCRIPT}"

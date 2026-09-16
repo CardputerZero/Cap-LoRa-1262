@@ -42,6 +42,18 @@ void shutdown();
 }
 
 namespace cap_lora {
+inline constexpr std::size_t MAX_TEXT_PAYLOAD = 127;
+inline constexpr float FREQUENCY_MHZ          = 868.0f;
+inline constexpr float BANDWIDTH_KHZ          = 125.0f;
+inline constexpr uint8_t SPREADING_FACTOR     = 12;
+inline constexpr uint8_t CODING_RATE          = 5;
+inline constexpr uint8_t SYNC_WORD            = 0x34;
+inline constexpr int8_t OUTPUT_POWER_DBM      = 22;
+inline constexpr uint16_t PREAMBLE_SYMBOLS    = 20;
+inline constexpr float TCXO_VOLTAGE           = 3.0f;
+inline constexpr float CURRENT_LIMIT_MA       = 140.0f;
+inline constexpr uint32_t SPI_SPEED_HZ        = 1000000;
+
 struct LoraInfo {
     int initialized = 0;
     int hw_ready = 0;
@@ -59,8 +71,19 @@ struct LoraInfo {
     char pi4io_status[160] = {};
     float rssi = 0.0f;
     float snr = 0.0f;
+    float frequency_mhz = FREQUENCY_MHZ;
+    float bandwidth_khz = BANDWIDTH_KHZ;
+    float tcxo_voltage = TCXO_VOLTAGE;
+    float current_limit_ma = CURRENT_LIMIT_MA;
+    uint64_t rx_count = 0;
+    uint64_t tx_count = 0;
+    uint32_t spi_speed_hz = SPI_SPEED_HZ;
+    uint16_t preamble_symbols = PREAMBLE_SYMBOLS;
+    uint8_t spreading_factor = SPREADING_FACTOR;
+    uint8_t coding_rate = CODING_RATE;
+    uint8_t sync_word = SYNC_WORD;
+    int8_t output_power_dbm = OUTPUT_POWER_DBM;
 };
-constexpr std::size_t MAX_TEXT_PAYLOAD = 127;
 }  // namespace cap_lora
 
 namespace cap_lora {
@@ -125,7 +148,7 @@ public:
     void set_tx_mode(bool enabled);
 
 private:
-    static constexpr std::size_t kMaxTextPayload = 127;
+    static constexpr std::size_t kMaxTextPayload = MAX_TEXT_PAYLOAD;
     std::shared_ptr<pw::spi::LinuxInitiator> spi_initiator_;
     std::shared_ptr<pw::digital_io::LinuxDigitalIoChip> gpio_chip_;
     std::shared_ptr<pw::i2c::LinuxInitiator> I2cInitiator_;
@@ -145,6 +168,8 @@ private:
     std::string spi_device_ = "/dev/spidev0.1";
     float last_rssi_ = 0.0f;
     float last_snr_ = 0.0f;
+    uint64_t rx_count_ = 0;
+    uint64_t tx_count_ = 0;
     inline static std::atomic<bool> received_flag_{false};
     inline static std::atomic<bool> transmitted_flag_{false};
     static void on_packet_received() noexcept { received_flag_.store(true, std::memory_order_release); }

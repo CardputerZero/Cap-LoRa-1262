@@ -56,7 +56,7 @@ SDL 桌面构建(可执行文件输出到 `dist/sdl/`):
 ```bash
 cmake -S . -B build/sdl -DCAP_LORA_USE_SDL=ON
 cmake --build build/sdl -j8
-LV_SDL_ZOOM=2 ./dist/sdl/M5CardputerZero-Cap-LoRa-1262
+LV_SDL_ZOOM=2 ./dist/sdl/Cap-LoRa-1262
 ```
 
 设备构建(仅限 Linux;可执行文件输出到 `dist/device/`):
