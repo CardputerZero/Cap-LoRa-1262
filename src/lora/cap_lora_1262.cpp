@@ -28,13 +28,21 @@ class MyRadioHal final : public RadioLibHal {
 private:
     std::shared_ptr<pw::spi::LinuxInitiator> spi_initiator_;
     std::shared_ptr<pw::digital_io::LinuxDigitalIoChip> gpio_chip_;
+    const std::atomic<bool>* stop_requested_ = nullptr;
+    std::atomic<RadioLibTime_t> cancellation_clock_ms_{0};
     int reset_fd_ = -1;
     int busy_fd_ = -1;
     int irq_fd_ = -1;
 
+    bool stopRequested() const noexcept
+    {
+        return stop_requested_ && stop_requested_->load(std::memory_order_acquire);
+    }
+
 public:
     MyRadioHal(const std::shared_ptr<pw::spi::LinuxInitiator>& spi_initiator,
-               const std::shared_ptr<pw::digital_io::LinuxDigitalIoChip>& gpio_chip)
+               const std::shared_ptr<pw::digital_io::LinuxDigitalIoChip>& gpio_chip,
+               const std::atomic<bool>& stop_requested)
         : RadioLibHal(
               /* input */ 0,
               /* output */ 1,
@@ -43,7 +51,8 @@ public:
               /* rising */ 1,
               /* falling */ 2),
           spi_initiator_(spi_initiator),
-          gpio_chip_(gpio_chip)
+          gpio_chip_(gpio_chip),
+          stop_requested_(&stop_requested)
     {
     }
     bool probe()
@@ -76,6 +85,7 @@ public:
     }
     uint32_t digitalRead(uint32_t pin) override
     {
+        if (stopRequested()) return 0;
         if (pin == RADIOLIB_NC) return 0;
         const int line_fd = pin == static_cast<uint32_t>(PinNum::GPIO) ? busy_fd_
                             : pin == static_cast<uint32_t>(PinNum::IRQ) ? irq_fd_
@@ -92,17 +102,23 @@ public:
 
     void delay(RadioLibTime_t milliseconds) override
     {
+        if (stopRequested()) return;
         ::usleep(static_cast<useconds_t>(milliseconds) * 1000U);
     }
     void delayMicroseconds(RadioLibTime_t microseconds) override
     {
+        if (stopRequested()) return;
         ::usleep(static_cast<useconds_t>(microseconds));
     }
     RadioLibTime_t millis() override
     {
         struct timespec time;
         ::clock_gettime(CLOCK_MONOTONIC, &time);
-        return static_cast<RadioLibTime_t>(time.tv_sec * 1000ULL + time.tv_nsec / 1000000ULL);
+        const auto now = static_cast<RadioLibTime_t>(time.tv_sec * 1000ULL + time.tv_nsec / 1000000ULL);
+        if (!stopRequested()) return now;
+        constexpr RadioLibTime_t kCancellationAdvanceMs = 1000;
+        return now + cancellation_clock_ms_.fetch_add(kCancellationAdvanceMs, std::memory_order_relaxed) +
+               kCancellationAdvanceMs;
     }
     RadioLibTime_t micros() override
     {
@@ -123,7 +139,7 @@ public:
     }
     void spiTransfer(uint8_t* tx, size_t len, uint8_t* rx) override
     {
-        if (!spi_initiator_) {
+        if (stopRequested() || !spi_initiator_) {
             if (rx) std::memset(rx, 0, len);
             return;
         }
@@ -224,7 +240,7 @@ bool cap_lora::CapLoRa1262::InitHard()
 }
 bool cap_lora::CapLoRa1262::InitModule()
 {
-    RadioHal_ = std::make_shared<MyRadioHal>(spi_initiator_, gpio_chip_);
+    RadioHal_ = std::make_shared<MyRadioHal>(spi_initiator_, gpio_chip_, stop_requested_);
     MyModule_ = std::make_shared<Module>(RadioHal_.get(), RADIOLIB_NC, 23, 26, 22);
     MyModule_->spiConfig.timeout = 100;
     sx1262_   = std::make_shared<SX1262>(MyModule_.get());
@@ -273,6 +289,10 @@ bool cap_lora::CapLoRa1262::initialize()
 {
     if (stop_requested_.load(std::memory_order_acquire)) return false;
     if (!sx1262_ && !probe()) return false;
+    if (stop_requested_.load(std::memory_order_acquire)) {
+        shutdown();
+        return false;
+    }
     if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) {
         shutdown();
         return false;
@@ -353,8 +373,17 @@ bool cap_lora::CapLoRa1262::send(const std::string& payload)
     return result.ok() && *result;
 }
 
-void cap_lora::CapLoRa1262::request_stop() noexcept { stop_requested_.store(true, std::memory_order_release); }
-void cap_lora::CapLoRa1262::clear_stop() noexcept { stop_requested_.store(false, std::memory_order_release); }
+void cap_lora::CapLoRa1262::request_stop() noexcept
+{
+    stop_requested_.store(true, std::memory_order_release);
+    cp0_lora_pi4io_controller::request_stop();
+}
+
+void cap_lora::CapLoRa1262::clear_stop() noexcept
+{
+    stop_requested_.store(false, std::memory_order_release);
+    cp0_lora_pi4io_controller::clear_stop();
+}
 
 void cap_lora::CapLoRa1262::shutdown()
 {
