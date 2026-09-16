@@ -211,7 +211,7 @@ bool cap_lora::CapLoRa1262::InitHard()
         cp0_lora_ext_power_controller::restore();
         return false;
     }
-    spi_initiator_ = std::make_shared<pw::spi::LinuxInitiator>(spi_fd, 1000000);
+    spi_initiator_ = std::make_shared<pw::spi::LinuxInitiator>(spi_fd, cap_lora::SPI_SPEED_HZ);
     const pw::spi::Config config{pw::spi::ClockPolarity::kActiveHigh, pw::spi::ClockPhase::kRisingEdge,
                                  pw::spi::BitsPerWord(8), pw::spi::BitOrder::kMsbFirst};
     if (!spi_initiator_->Configure(config).ok()) {
@@ -268,6 +268,7 @@ bool cap_lora::CapLoRa1262::service_radio()
         tx_mode_ = false;
         tx_pending_ = result == RADIOLIB_ERR_NONE;
         if (result != RADIOLIB_ERR_NONE) return false;
+        ++tx_count_;
         return sx1262_->startReceive() == RADIOLIB_ERR_NONE;
     }
     const bool rx_done = received_flag_.exchange(false, std::memory_order_acq_rel) ||
@@ -280,6 +281,7 @@ bool cap_lora::CapLoRa1262::service_radio()
     queued_message_.assign(reinterpret_cast<const char*>(buffer), read_length);
     last_rssi_ = sx1262_->getRSSI();
     last_snr_ = sx1262_->getSNR();
+    ++rx_count_;
     rx_pending_ = !queued_message_.empty();
     (void)sx1262_->startReceive();
     return true;
@@ -293,11 +295,13 @@ bool cap_lora::CapLoRa1262::initialize()
         shutdown();
         return false;
     }
-    if (sx1262_->begin(868.0f, 125.0f, 12, 5, 0x34, 22, 20, 3.0f, false) != RADIOLIB_ERR_NONE) {
+    if (sx1262_->begin(FREQUENCY_MHZ, BANDWIDTH_KHZ, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, OUTPUT_POWER_DBM,
+                       PREAMBLE_SYMBOLS, TCXO_VOLTAGE, false) != RADIOLIB_ERR_NONE) {
         shutdown();
         return false;
     }
-    if (sx1262_->setCurrentLimit(140) != RADIOLIB_ERR_NONE || sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE) {
+    if (sx1262_->setCurrentLimit(CURRENT_LIMIT_MA) != RADIOLIB_ERR_NONE ||
+        sx1262_->setDio2AsRfSwitch(true) != RADIOLIB_ERR_NONE) {
         shutdown();
         return false;
     }
@@ -311,6 +315,8 @@ bool cap_lora::CapLoRa1262::initialize()
     tx_pending_ = false;
     queued_message_.clear();
     last_tx_.clear();
+    rx_count_ = 0;
+    tx_count_ = 0;
     received_flag_.store(false, std::memory_order_release);
     transmitted_flag_.store(false, std::memory_order_release);
     if (!set_rx_mode()) {
@@ -425,7 +431,7 @@ void cap_lora::CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     *info = LoraInfo{};
     std::snprintf(info->spi_device, sizeof(info->spi_device), "%s", spi_device_.c_str());
     std::snprintf(info->diag, sizeof(info->diag), "%s", initialized_ ? "SX1262 ready" : "SX1262 not initialized");
-    std::snprintf(info->pi4io_status, sizeof(info->pi4io_status), "%s", initialized_ ? "PI4IO ready" : "PI4IO not initialized");
+    std::snprintf(info->pi4io_status, sizeof(info->pi4io_status), "%s", cp0_lora_pi4io_controller::status());
     info->initialized = initialized_ ? 1 : 0;
     info->hw_ready = initialized_ ? 1 : 0;
     info->tx_mode = tx_mode_ ? 1 : 0;
@@ -433,12 +439,12 @@ void cap_lora::CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     info->has_sent_message = has_sent_message_ ? 1 : 0;
     info->rx_event = rx_pending_ ? 1 : 0;
     info->tx_event = tx_pending_ ? 1 : 0;
-    if (!queued_message_.empty()) {
-        std::snprintf(info->last_rx, sizeof(info->last_rx), "%s", queued_message_.c_str());
-        info->rssi = last_rssi_;
-        info->snr = last_snr_;
-    }
+    if (!queued_message_.empty()) std::snprintf(info->last_rx, sizeof(info->last_rx), "%s", queued_message_.c_str());
     if (!last_tx_.empty()) std::snprintf(info->last_tx, sizeof(info->last_tx), "%s", last_tx_.c_str());
+    info->rssi = last_rssi_;
+    info->snr = last_snr_;
+    info->rx_count = rx_count_;
+    info->tx_count = tx_count_;
     if (drain_events) {
         rx_pending_ = false;
         tx_pending_ = false;

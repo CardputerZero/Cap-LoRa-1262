@@ -9,6 +9,16 @@
 
 namespace cap_gps {
 
+enum class KeyCommand : uint32_t {
+    Copy  = 0x110000,
+    Paste = 0x110001,
+};
+
+constexpr uint32_t keyCommandValue(KeyCommand command) noexcept
+{
+    return static_cast<uint32_t>(command);
+}
+
 class GpsKeypad {
 public:
     using KeyCallback = std::function<bool(uint32_t, const char*, bool)>;
@@ -47,6 +57,8 @@ private:
     uint32_t _last_key        = 0;
     bool _left_shift_pressed  = false;
     bool _right_shift_pressed = false;
+    bool _left_ctrl_pressed   = false;
+    bool _right_ctrl_pressed  = false;
 };
 
 }  // namespace cap_gps

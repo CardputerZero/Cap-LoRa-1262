@@ -1,5 +1,6 @@
 #include "lora_page_model.hpp"
 
+#include <algorithm>
 #include <utility>
 
 void LoraPageModel::reset(bool hardware_ready)
@@ -8,12 +9,15 @@ void LoraPageModel::reset(bool hardware_ready)
     tx_input_.clear();
     tx_cursor_ = 0;
     send_status_.clear();
+    editor_mode_ = LoraEditorMode::NONE;
     messages_.clear();
+    selected_message_index_.reset();
 }
 
 void LoraPageModel::begin_send(char first_character)
 {
     view_ = LoraView::SEND;
+    editor_mode_ = LoraEditorMode::MESSAGE;
     tx_input_.clear();
     tx_cursor_ = 0;
     send_status_.clear();
@@ -23,9 +27,19 @@ void LoraPageModel::begin_send(char first_character)
     }
 }
 
-void LoraPageModel::cancel_send()
+void LoraPageModel::begin_nickname_edit()
 {
-    view_ = LoraView::MESSAGES;
+    view_        = LoraView::INFO;
+    editor_mode_ = LoraEditorMode::NICKNAME;
+    tx_input_    = nickname_;
+    tx_cursor_   = tx_input_.size();
+    send_status_.clear();
+}
+
+void LoraPageModel::cancel_editor()
+{
+    view_ = editor_mode_ == LoraEditorMode::NICKNAME ? LoraView::INFO : LoraView::MESSAGES;
+    editor_mode_ = LoraEditorMode::NONE;
     tx_input_.clear();
     tx_cursor_ = 0;
     send_status_.clear();
@@ -33,9 +47,34 @@ void LoraPageModel::cancel_send()
 
 bool LoraPageModel::append_character(char character)
 {
-    if (character < 0x20 || character > 0x7e || tx_input_.size() >= TX_INPUT_LIMIT) return false;
+    if (character < 0x20 || character > 0x7e) return false;
+    const size_t limit = editor_mode_ == LoraEditorMode::NICKNAME ? lora_chat_protocol::kMaxNicknameBytes
+                                                                  : TX_INPUT_LIMIT;
+    if (tx_input_.size() >= limit) {
+        send_status_ = editor_mode_ == LoraEditorMode::NICKNAME ? "10 byte limit" : "Message is too long";
+        return false;
+    }
     tx_input_.insert(tx_cursor_, 1, character);
     ++tx_cursor_;
+    send_status_.clear();
+    return true;
+}
+
+bool LoraPageModel::insert_text(std::string_view text)
+{
+    if (text.empty() ||
+        !std::all_of(text.begin(), text.end(), [](unsigned char character) {
+            return character >= 0x20 && character <= 0x7e;
+        }))
+        return false;
+    const size_t limit = editor_mode_ == LoraEditorMode::NICKNAME ? lora_chat_protocol::kMaxNicknameBytes
+                                                                  : TX_INPUT_LIMIT;
+    if (tx_input_.size() > limit || text.size() > limit - tx_input_.size()) {
+        send_status_ = editor_mode_ == LoraEditorMode::NICKNAME ? "10 byte limit" : "Message is too long";
+        return false;
+    }
+    tx_input_.insert(tx_cursor_, text);
+    tx_cursor_ += text.size();
     send_status_.clear();
     return true;
 }
@@ -66,17 +105,36 @@ void LoraPageModel::set_cursor_position(size_t position)
 void LoraPageModel::complete_send()
 {
     view_ = LoraView::MESSAGES;
+    editor_mode_ = LoraEditorMode::NONE;
     tx_input_.clear();
     tx_cursor_ = 0;
     send_status_.clear();
 }
 
-void LoraPageModel::append_message(std::string text, bool outgoing, float rssi, float snr,
+void LoraPageModel::complete_nickname_edit(std::string nickname)
+{
+    nickname_    = std::move(nickname);
+    view_        = LoraView::INFO;
+    editor_mode_ = LoraEditorMode::NONE;
+    tx_input_.clear();
+    tx_cursor_ = 0;
+    send_status_.clear();
+}
+
+void LoraPageModel::append_message(std::string text, bool outgoing, float rssi, float snr, std::string sender_name,
                                    LoraMessageDelivery delivery)
 {
     if (text.empty()) text = "<empty>";
-    if (messages_.size() >= MESSAGE_HISTORY_LIMIT) messages_.pop_front();
-    messages_.push_back({std::move(text), outgoing, rssi, snr, delivery});
+    if (messages_.size() >= MESSAGE_HISTORY_LIMIT) {
+        messages_.pop_front();
+        if (selected_message_index_) {
+            if (*selected_message_index_ == 0)
+                selected_message_index_.reset();
+            else
+                --*selected_message_index_;
+        }
+    }
+    messages_.push_back({std::move(text), outgoing, rssi, snr, std::move(sender_name), delivery});
 }
 
 bool LoraPageModel::resolve_latest_pending(bool sent)
@@ -87,4 +145,31 @@ bool LoraPageModel::resolve_latest_pending(bool sent)
         return true;
     }
     return false;
+}
+
+bool LoraPageModel::select_message(int direction)
+{
+    if (messages_.empty()) return false;
+    const auto previous = selected_message_index_;
+    if (!selected_message_index_) {
+        selected_message_index_ = messages_.size() - 1;
+    } else if (direction < 0 && *selected_message_index_ > 0) {
+        --*selected_message_index_;
+    } else if (direction > 0 && *selected_message_index_ + 1 < messages_.size()) {
+        ++*selected_message_index_;
+    }
+    return previous != selected_message_index_;
+}
+
+bool LoraPageModel::clear_message_selection()
+{
+    if (!selected_message_index_) return false;
+    selected_message_index_.reset();
+    return true;
+}
+
+const LoraChatMessage *LoraPageModel::selected_message() const
+{
+    if (!selected_message_index_ || *selected_message_index_ >= messages_.size()) return nullptr;
+    return &messages_[*selected_message_index_];
 }

@@ -23,6 +23,8 @@ bool CapLoRa1262::initialize()
     last_tx_.clear();
     last_rssi_ = -48.0f;
     last_snr_ = 7.0f;
+    rx_count_ = 0;
+    tx_count_ = 0;
     return true;
 }
 
@@ -58,11 +60,13 @@ pw::Result<bool> CapLoRa1262::msg_send(const std::string& payload)
     tx_mode_ = false;
     has_sent_message_ = true;
     last_tx_ = payload;
-    queued_message_ = "SDL echo: " + payload;
+    queued_message_ = payload;
     rx_pending_ = true;
     tx_pending_ = true;
     last_rssi_ = -42.0f;
     last_snr_ = 9.5f;
+    ++rx_count_;
+    ++tx_count_;
     return true;
 }
 
@@ -113,6 +117,8 @@ void CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     if (!last_tx_.empty()) std::snprintf(info->last_tx, sizeof(info->last_tx), "%s", last_tx_.c_str());
     info->rssi = last_rssi_;
     info->snr = last_snr_;
+    info->rx_count = rx_count_;
+    info->tx_count = tx_count_;
     if (drain_events) {
         rx_pending_ = false;
         tx_pending_ = false;

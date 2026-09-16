@@ -43,7 +43,7 @@ constexpr bool contains(std::string_view value)
 constexpr int kScreenWidth = 320;
 constexpr int kContentHeight = 150;
 constexpr int kMessageHistoryLimit = 64;
-constexpr int kTxInputLimit = 127;
+constexpr int kTxInputLimit = 116;
 constexpr int kPollIntervalMs = 300;
 constexpr int kInitRetryIntervalMs = 3000;
 constexpr int kMessageTitleHoldMs = 3200;
@@ -53,6 +53,7 @@ constexpr int kViewTransitionMs = 150;
 constexpr unsigned kPageBackground = 0x0B0C0E;
 constexpr unsigned kOutgoingBubble = 0x3FCC75;
 constexpr unsigned kIncomingBubble = 0xCCCCCC;
+constexpr unsigned kSelectedBubble = 0xF2C94C;
 constexpr unsigned kInitializingColor = 0xC9A45C;
 constexpr unsigned kRadioOffColor = 0xD96C6C;
 constexpr unsigned kReceivingColor = 0x69AD80;
@@ -99,10 +100,11 @@ int main()
 {
     static_assert(kUiCalls.size() == 77);
     static_assert(kScreenWidth == 320 && kContentHeight == 150);
-    static_assert(kMessageHistoryLimit == 64 && kTxInputLimit == 127);
+    static_assert(kMessageHistoryLimit == 64 && kTxInputLimit == 116);
     static_assert(kPollIntervalMs == 300 && kInitRetryIntervalMs == 3000);
     static_assert(kMessageTitleHoldMs == 3200 && kMessageTitleHideMs == 340 && kViewTransitionMs == 150);
-    static_assert(kPageBackground == 0x0B0C0E && kOutgoingBubble == 0x3FCC75 && kIncomingBubble == 0xCCCCCC);
+    static_assert(kPageBackground == 0x0B0C0E && kOutgoingBubble == 0x3FCC75 && kIncomingBubble == 0xCCCCCC &&
+                  kSelectedBubble == 0xF2C94C);
     static_assert(kInitializingColor == 0xC9A45C && kRadioOffColor == 0xD96C6C && kReceivingColor == 0x69AD80);
 
     // Creation/layout, content, scrolling, timers, animations, events, and

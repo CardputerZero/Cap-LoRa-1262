@@ -6,6 +6,10 @@
 
 #include "lora_screen.hpp"
 
+#include "input/gps_keypad.hpp"
+#include "models/lora_chat_protocol.hpp"
+#include "models/lora_nickname_store.hpp"
+
 #include <atomic>
 #include <exception>
 #include <mutex>
@@ -100,6 +104,7 @@ void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitiali
 
 LoraScreen::LoraScreen()
 {
+    model_.set_nickname(lora_nickname_store::load_or_default());
     lora_device_ = std::make_unique<cap_lora::CapLoRa1262>();
 }
 
@@ -156,7 +161,21 @@ void LoraScreen::tick(uint32_t)
 bool LoraScreen::handleKey(uint32_t key)
 {
     if (!app_active_) return false;
-    return handle_key(lora_app_detail::normalize_lora_key(key, model_.view()));
+    if (key == cap_gps::keyCommandValue(cap_gps::KeyCommand::Copy)) {
+        copy_selected_message();
+        return true;
+    }
+    if (key == cap_gps::keyCommandValue(cap_gps::KeyCommand::Paste)) {
+        paste_clipboard();
+        return true;
+    }
+    if (model_.editor_mode() == LoraEditorMode::NONE && model_.view() == LoraView::MESSAGES &&
+        (key == LV_KEY_UP || key == LV_KEY_DOWN)) {
+        select_message(key == LV_KEY_UP ? -1 : 1);
+        return true;
+    }
+    const LoraView input_view = model_.editor_mode() == LoraEditorMode::NONE ? model_.view() : LoraView::SEND;
+    return handle_key(lora_app_detail::normalize_lora_key(key, input_view));
 }
 
 void LoraScreen::init_lora()
@@ -245,7 +264,7 @@ bool LoraScreen::refresh_lora_info(bool poll)
     return true;
 }
 
-void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr,
+void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi, float snr, std::string sender_name,
                                      LoraMessageDelivery delivery)
 {
     if (!message_list_) return;
@@ -258,11 +277,11 @@ void LoraScreen::append_chat_message(const char *text, bool outgoing, float rssi
         lv_obj_t *oldest_row = lv_obj_get_child(message_list_, 0);
         if (oldest_row) lv_obj_delete(oldest_row);
     }
-    model_.append_message(text ? text : "", outgoing, rssi, snr, delivery);
+    model_.append_message(text ? text : "", outgoing, rssi, snr, std::move(sender_name), delivery);
     last_message_row_ = append_message_row(model_.messages().back());
     set_visible(empty_message_label_, false);
     set_visible(empty_message_hint_label_, false);
-    if (model_.view() == LoraView::MESSAGES)
+    if (model_.view() == LoraView::MESSAGES && !model_.selected_message_index())
         scroll_to_latest(LV_ANIM_ON);
     else
         scroll_to_latest_pending_ = true;
@@ -273,7 +292,8 @@ void LoraScreen::rebuild_message_list()
     if (!message_list_) return;
     lv_obj_clean(message_list_);
     last_message_row_ = nullptr;
-    for (const auto &message : model_.messages()) last_message_row_ = append_message_row(message);
+    for (size_t index = 0; index < model_.messages().size(); ++index)
+        last_message_row_ = append_message_row(model_.messages()[index], model_.selected_message_index() == index);
     const bool empty = model_.messages().empty();
     set_visible(empty_message_label_, empty);
     set_visible(empty_message_hint_label_, empty);
@@ -281,7 +301,12 @@ void LoraScreen::rebuild_message_list()
     // position to the top. Do not animate that internal repositioning: an
     // animated rebuild makes the whole history visibly slide from the first
     // message to the latest one after a send status update.
-    if (!empty) scroll_to_latest(LV_ANIM_OFF);
+    if (!empty && model_.selected_message_index()) {
+        lv_obj_t *selected_row = lv_obj_get_child(message_list_, static_cast<int32_t>(*model_.selected_message_index()));
+        if (selected_row) lv_obj_scroll_to_view(selected_row, LV_ANIM_OFF);
+    } else if (!empty) {
+        scroll_to_latest(LV_ANIM_OFF);
+    }
 }
 
 void LoraScreen::settle_pending_transmit()
@@ -312,24 +337,79 @@ void LoraScreen::scroll_messages(int32_t amount)
     if (message_list_) lv_obj_scroll_by_bounded(message_list_, 0, amount, LV_ANIM_ON);
 }
 
-void LoraScreen::cancel_send()
+void LoraScreen::select_message(int direction)
 {
-    model_.cancel_send();
+    dismiss_message_title();
+    if (model_.select_message(direction)) rebuild_message_list();
+}
+
+void LoraScreen::copy_selected_message()
+{
+    if (model_.view() != LoraView::MESSAGES || model_.editor_mode() != LoraEditorMode::NONE) return;
+    const LoraChatMessage *message = model_.selected_message();
+    if (message) clipboard_text_ = message->text;
+}
+
+void LoraScreen::paste_clipboard()
+{
+    if (model_.editor_mode() != LoraEditorMode::MESSAGE || clipboard_text_.empty()) return;
+    (void)model_.insert_text(clipboard_text_);
+    update_send_content();
+}
+
+void LoraScreen::clear_message_selection()
+{
+    if (model_.clear_message_selection()) rebuild_message_list();
+}
+
+void LoraScreen::scroll_info(int32_t amount)
+{
+    if (info_table_) lv_obj_scroll_by_bounded(info_table_, 0, amount, LV_ANIM_ON);
+}
+
+void LoraScreen::open_nickname_editor()
+{
+    model_.begin_nickname_edit();
+    render_current_view();
+}
+
+void LoraScreen::cancel_editor()
+{
+    model_.cancel_editor();
+    render_current_view();
+}
+
+void LoraScreen::save_nickname()
+{
+    const std::string nickname = model_.tx_input();
+    if (nickname.empty() || nickname.find_first_not_of(' ') == std::string::npos) {
+        model_.set_send_status("Nickname is empty");
+        update_send_content();
+        return;
+    }
+    std::string error;
+    if (!lora_nickname_store::save(nickname, error)) {
+        spdlog::error("LoRa nickname: {}", error);
+        model_.set_send_status("Unable to save nickname");
+        update_send_content();
+        return;
+    }
+    model_.complete_nickname_edit(nickname);
     render_current_view();
 }
 
 bool LoraScreen::handle_send_key(uint32_t key)
 {
     if (key == LV_KEY_ESC) {
-        cancel_send();
+        cancel_editor();
     } else if (key == LV_KEY_LEFT) {
         if (model_.move_cursor(-1)) update_send_content();
     } else if (key == LV_KEY_RIGHT) {
         if (model_.move_cursor(1)) update_send_content();
-    } else if (key == LV_KEY_UP) {
+    } else if (key == LV_KEY_UP && model_.editor_mode() == LoraEditorMode::MESSAGE) {
         move_send_cursor_vertical(-1);
         update_send_content();
-    } else if (key == LV_KEY_DOWN) {
+    } else if (key == LV_KEY_DOWN && model_.editor_mode() == LoraEditorMode::MESSAGE) {
         move_send_cursor_vertical(1);
         update_send_content();
     } else if (key == LV_KEY_END) {
@@ -339,7 +419,10 @@ bool LoraScreen::handle_send_key(uint32_t key)
         model_.erase_character();
         update_send_content();
     } else if (key == LV_KEY_ENTER) {
-        send_current_text();
+        if (model_.editor_mode() == LoraEditorMode::NICKNAME)
+            save_nickname();
+        else
+            send_current_text();
     } else if (lora_app_detail::is_printable_ascii(key)) {
         append_text_key(key);
         update_send_content();
@@ -363,10 +446,15 @@ bool LoraScreen::handle_navigation_key(uint32_t key)
         scroll_messages(key == LV_KEY_UP ? lora_app_detail::kMessageScrollStep : -lora_app_detail::kMessageScrollStep);
         return true;
     }
-    if (model_.view() == LoraView::INFO &&
-        (key == LV_KEY_UP || key == LV_KEY_DOWN || key == LV_KEY_ENTER ||
-         lora_app_detail::is_printable_ascii(key)))
+    if (model_.view() == LoraView::INFO && (key == LV_KEY_UP || key == LV_KEY_DOWN)) {
+        scroll_info(key == LV_KEY_UP ? lora_app_detail::kMessageScrollStep : -lora_app_detail::kMessageScrollStep);
         return true;
+    }
+    if (model_.view() == LoraView::INFO && key == LV_KEY_ENTER) {
+        open_nickname_editor();
+        return true;
+    }
+    if (model_.view() == LoraView::INFO && lora_app_detail::is_printable_ascii(key)) return true;
     if (key == LV_KEY_ENTER) {
         if (initialization_pending_ || !lora_info_.hw_ready) return true;
         open_send_view(0);
@@ -382,7 +470,7 @@ bool LoraScreen::handle_navigation_key(uint32_t key)
 
 bool LoraScreen::handle_key(uint32_t key)
 {
-    if (model_.view() == LoraView::SEND) return handle_send_key(key);
+    if (model_.editor_mode() != LoraEditorMode::NONE) return handle_send_key(key);
     if (key == LV_KEY_ESC || key == LV_KEY_BACKSPACE || key == LV_KEY_DEL) {
         // LoraApp converts an unhandled exit key into a quit request. Avoid
         // joining the initialization worker from inside an input callback.
@@ -414,9 +502,11 @@ void LoraScreen::send_current_text()
         return;
     }
     std::string sent_text(model_.tx_input());
-    if (lora_device_ && lora_device_->exec_send(sent_text.c_str())) {
-        pending_tx_text_ = sent_text;
-        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, LoraMessageDelivery::PENDING);
+    const std::string payload = lora_chat_protocol::encode(sent_text, model_.nickname());
+    if (lora_device_ && !payload.empty() && lora_device_->exec_send(payload.c_str())) {
+        pending_tx_text_ = payload;
+        clear_message_selection();
+        append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING);
         model_.complete_send();
         refresh_lora_info(false);
         render_current_view();
@@ -429,7 +519,7 @@ void LoraScreen::send_current_text()
 void LoraScreen::on_poll_timer()
 {
     if (!app_active_ || !page_root_) return;
-    if (model_.view() == LoraView::SEND) update_send_cursor();
+    if (model_.editor_mode() != LoraEditorMode::NONE) update_send_cursor();
     if (initialization_pending_) {
         (void)consume_lora_initialization();
         return;
@@ -446,7 +536,11 @@ void LoraScreen::on_poll_timer()
     }
     if (!refresh_lora_info(true)) return;
     settle_pending_transmit();
-    if (lora_info_.rx_event) append_chat_message(lora_info_.last_rx, false, lora_info_.rssi, lora_info_.snr);
+    if (lora_info_.rx_event) {
+        const auto received = lora_chat_protocol::decode(lora_info_.last_rx);
+        append_chat_message(received.message.c_str(), false, lora_info_.rssi, lora_info_.snr,
+                            std::move(received.nickname));
+    }
     if (model_.view() == LoraView::INFO) update_info_content();
 }
 
@@ -457,9 +551,10 @@ void LoraScreen::static_cancel_button_cb(lv_event_t *event) noexcept
         if (!event) return;
         self = static_cast<LoraScreen *>(lv_event_get_user_data(event));
         if (!self || !lora_send_action_callback_allowed(lv_event_get_current_target(event), self->send_cancel_button_,
-                                                        self->app_active_, self->model_.view() == LoraView::SEND))
+                                                        self->app_active_,
+                                                        self->model_.editor_mode() != LoraEditorMode::NONE))
             return;
-        self->cancel_send();
+        self->cancel_editor();
     } catch (...) {
         if (self) self->app_active_ = false;
     }
@@ -472,10 +567,29 @@ void LoraScreen::static_send_button_cb(lv_event_t *event) noexcept
         if (!event) return;
         self = static_cast<LoraScreen *>(lv_event_get_user_data(event));
         if (!self || !lora_send_action_callback_allowed(lv_event_get_current_target(event), self->send_confirm_button_,
-                                                        self->app_active_, self->model_.view() == LoraView::SEND))
+                                                        self->app_active_,
+                                                        self->model_.editor_mode() != LoraEditorMode::NONE))
             return;
-        self->send_current_text();
+        if (self->model_.editor_mode() == LoraEditorMode::NICKNAME)
+            self->save_nickname();
+        else
+            self->send_current_text();
     } catch (...) {
+        if (self) self->app_active_ = false;
+    }
+}
+
+void LoraScreen::static_nickname_button_cb(lv_event_t *event) noexcept
+{
+    try {
+        if (!event) return;
+        auto *self = static_cast<LoraScreen *>(lv_event_get_user_data(event));
+        if (!self || lv_event_get_current_target(event) != self->info_change_name_button_ || !self->app_active_ ||
+            self->model_.view() != LoraView::INFO || self->model_.editor_mode() != LoraEditorMode::NONE)
+            return;
+        self->open_nickname_editor();
+    } catch (...) {
+        auto *self = event ? static_cast<LoraScreen *>(lv_event_get_user_data(event)) : nullptr;
         if (self) self->app_active_ = false;
     }
 }

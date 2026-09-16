@@ -18,8 +18,13 @@ int main()
     CHECK(radio.exec_send("test payload"));
     radio.get_info(&info, false);
     CHECK(info.has_sent_message && info.rx_event && info.tx_event);
-    CHECK(std::strcmp(info.last_rx, "SDL echo: test payload") == 0);
+    CHECK(std::strcmp(info.last_rx, "test payload") == 0);
     CHECK(info.rssi == -42.0f && info.snr == 9.5f);
+
+    const std::string maximum(cap_lora::MAX_TEXT_PAYLOAD, 'M');
+    CHECK(radio.exec_send(maximum.c_str()));
+    radio.get_info(&info, false);
+    CHECK(std::string(info.last_rx) == maximum);
 
     const std::string oversized(cap_lora::MAX_TEXT_PAYLOAD + 1, 'X');
     CHECK(!radio.exec_send(oversized.c_str()));

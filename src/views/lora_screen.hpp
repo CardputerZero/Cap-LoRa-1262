@@ -12,6 +12,7 @@
 #include <lvgl.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -52,6 +53,30 @@ public:
     bool active() const noexcept { return app_active_; }
 
 private:
+    enum class InfoRowId : uint8_t {
+        Nickname,
+        Rssi,
+        Snr,
+        Radio,
+        Frequency,
+        Version,
+        Modulation,
+        Bandwidth,
+        SpreadingFactor,
+        CodingRate,
+        Power,
+        Preamble,
+        SyncWord,
+        TcxoVoltage,
+        CurrentLimit,
+        PayloadLimit,
+        SpiDevice,
+        Pi4io,
+        Count,
+    };
+
+    static constexpr std::size_t INFO_ROW_COUNT = static_cast<std::size_t>(InfoRowId::Count);
+
     LoraPageModel model_;
     bool app_active_               = false;
     bool initialization_pending_   = false;
@@ -62,6 +87,7 @@ private:
     std::unique_ptr<cap_lora::CapLoRa1262> lora_device_;
     uint32_t last_init_attempt_tick_ = 0;
     std::string pending_tx_text_;
+    std::string clipboard_text_;
 
     lv_timer_t *poll_timer_ = nullptr;
     lv_timer_t *message_title_timer_    = nullptr;
@@ -75,12 +101,13 @@ private:
     lv_obj_t *info_view_                = nullptr;
     lv_obj_t *info_status_dot_          = nullptr;
     lv_obj_t *info_status_label_        = nullptr;
-    lv_obj_t *info_device_value_        = nullptr;
-    lv_obj_t *info_rssi_value_          = nullptr;
-    lv_obj_t *info_snr_value_           = nullptr;
-    lv_obj_t *info_link_value_          = nullptr;
-    lv_obj_t *info_diag_value_          = nullptr;
+    lv_obj_t *info_change_name_button_  = nullptr;
+    lv_obj_t *info_stats_label_         = nullptr;
+    lv_obj_t *info_table_               = nullptr;
+    lv_obj_t *info_table_content_       = nullptr;
+    std::array<lv_obj_t *, INFO_ROW_COUNT> info_value_labels_{};
     lv_obj_t *send_view_                = nullptr;
+    lv_obj_t *send_title_label_         = nullptr;
     lv_obj_t *send_input_bubble_        = nullptr;
     lv_obj_t *send_input_label_         = nullptr;
     lv_obj_t *send_cursor_label_        = nullptr;
@@ -129,6 +156,7 @@ private:
     void update_info_content();
     void update_send_content();
     void update_send_cursor();
+    void configure_editor_layout();
     void move_send_cursor_vertical(int direction);
     void scroll_to_latest(lv_anim_enable_t animation);
     void schedule_message_title_dismissal();
@@ -144,15 +172,22 @@ private:
     void transition_to_view(lv_obj_t *target);
     void render_current_view();
 
-    lv_obj_t *append_message_row(const LoraChatMessage &message);
+    lv_obj_t *append_message_row(const LoraChatMessage &message, bool selected = false);
 
-    void append_chat_message(const char *text, bool outgoing, float rssi, float snr,
+    void append_chat_message(const char *text, bool outgoing, float rssi, float snr, std::string sender_name = {},
                              LoraMessageDelivery delivery = LoraMessageDelivery::RECEIVED);
     void rebuild_message_list();
     void settle_pending_transmit();
     void open_send_view(uint32_t first_key);
     void scroll_messages(int32_t amount);
-    void cancel_send();
+    void select_message(int direction);
+    void copy_selected_message();
+    void paste_clipboard();
+    void clear_message_selection();
+    void scroll_info(int32_t amount);
+    void open_nickname_editor();
+    void cancel_editor();
+    void save_nickname();
     bool handle_send_key(uint32_t key);
     bool handle_navigation_key(uint32_t key);
     bool handle_key(uint32_t key);
@@ -161,6 +196,7 @@ private:
     void on_poll_timer();
     static void static_cancel_button_cb(lv_event_t *event) noexcept;
     static void static_send_button_cb(lv_event_t *event) noexcept;
+    static void static_nickname_button_cb(lv_event_t *event) noexcept;
     static void static_poll_timer_cb(lv_timer_t *timer) noexcept;
     static void static_message_title_timer_cb(lv_timer_t *timer) noexcept;
 };
