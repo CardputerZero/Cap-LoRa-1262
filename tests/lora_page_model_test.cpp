@@ -18,30 +18,25 @@ int main()
     CHECK(lora_animation_callback_allowed(&animation_target));
     CHECK(!lora_animation_callback_allowed(static_cast<int *>(nullptr)));
 
-    int delete_target = 1;
+    int delete_target  = 1;
     int bubbled_target = 2;
     CHECK(lora_owned_delete_callback_allowed(&delete_target, &delete_target));
     CHECK(!lora_owned_delete_callback_allowed(&delete_target, &bubbled_target));
-    CHECK(!lora_owned_delete_callback_allowed(
-        static_cast<int *>(nullptr), &delete_target));
+    CHECK(!lora_owned_delete_callback_allowed(static_cast<int *>(nullptr), &delete_target));
 
     int action_button = 3;
-    int stale_button = 4;
-    static_assert(noexcept(lora_send_action_callback_allowed(
-        static_cast<int *>(nullptr), static_cast<int *>(nullptr), false, false)));
-    CHECK(lora_send_action_callback_allowed(
-        &action_button, &action_button, true, true));
-    CHECK(!lora_send_action_callback_allowed(
-        &stale_button, &action_button, true, true));
-    CHECK(!lora_send_action_callback_allowed(
-        &action_button, &action_button, false, true));
-    CHECK(!lora_send_action_callback_allowed(
-        &action_button, &action_button, true, false));
+    int stale_button  = 4;
+    static_assert(noexcept(
+        lora_send_action_callback_allowed(static_cast<int *>(nullptr), static_cast<int *>(nullptr), false, false)));
+    CHECK(lora_send_action_callback_allowed(&action_button, &action_button, true, true));
+    CHECK(!lora_send_action_callback_allowed(&stale_button, &action_button, true, true));
+    CHECK(!lora_send_action_callback_allowed(&action_button, &action_button, false, true));
+    CHECK(!lora_send_action_callback_allowed(&action_button, &action_button, true, false));
 
-    int page_root = 5;
+    int page_root  = 5;
     int stale_page = 6;
-    static_assert(noexcept(lora_page_event_callback_allowed(
-        static_cast<int *>(nullptr), static_cast<int *>(nullptr), false)));
+    static_assert(
+        noexcept(lora_page_event_callback_allowed(static_cast<int *>(nullptr), static_cast<int *>(nullptr), false)));
     CHECK(lora_page_event_callback_allowed(&page_root, &page_root, true));
     CHECK(!lora_page_event_callback_allowed(&stale_page, &page_root, true));
     CHECK(!lora_page_event_callback_allowed(&page_root, &page_root, false));
@@ -50,7 +45,7 @@ int main()
     CHECK(!lora_info_response_valid(-1, 32, 32));
     CHECK(!lora_info_response_valid(0, 31, 32));
 
-    int handle = 1;
+    int handle   = 1;
     int *present = &handle;
     int *missing = nullptr;
     CHECK(lora_page_ui_ready(present, present, present, present, present, present));
@@ -72,6 +67,13 @@ int main()
     CHECK(lora_app_detail::normalize_lora_key('f', LoraView::INFO) == LV_KEY_UP);
     CHECK(lora_app_detail::normalize_lora_key('f', LoraView::SEND) == 'f');
     CHECK(lora_app_detail::normalize_lora_key('X', LoraView::SEND) == 'X');
+    CHECK(lora_app_detail::is_desktop_help_key('h', LoraEditorMode::NONE, false, true));
+    CHECK(lora_app_detail::is_desktop_help_key('H', LoraEditorMode::NONE, false, true));
+    CHECK(!lora_app_detail::is_desktop_help_key('h', LoraEditorMode::MESSAGE, false, true));
+    CHECK(!lora_app_detail::is_desktop_help_key('H', LoraEditorMode::NICKNAME, false, true));
+    CHECK(lora_app_detail::is_desktop_help_key('H', LoraEditorMode::MESSAGE, true, true));
+    CHECK(!lora_app_detail::is_desktop_help_key('h', LoraEditorMode::NONE, false, false));
+    CHECK(!lora_app_detail::is_desktop_help_key('x', LoraEditorMode::NONE, false, true));
 
     model.reset(false);
     CHECK(model.view() == LoraView::INFO);
@@ -102,8 +104,7 @@ int main()
     CHECK(model.nickname() == maximum_nickname);
 
     model.begin_send();
-    for (size_t index = 0; index < LoraPageModel::TX_INPUT_LIMIT; ++index)
-        CHECK(model.append_character('x'));
+    for (size_t index = 0; index < LoraPageModel::TX_INPUT_LIMIT; ++index) CHECK(model.append_character('x'));
     const std::string maximum_input = model.tx_input();
     CHECK(!model.append_character('y'));
     CHECK(model.tx_input() == maximum_input);
@@ -167,8 +168,7 @@ int main()
     CHECK(model.selected_message() && model.selected_message()->text == "65");
     CHECK(model.select_message(1));
     CHECK(model.selected_message() && model.selected_message()->text == "66");
-    model.append_message("67", false, -70.0f, 8.0f, {}, LoraMessageDelivery::RECEIVED,
-                         quoted_message, "Alice");
+    model.append_message("67", false, -70.0f, 8.0f, {}, LoraMessageDelivery::RECEIVED, quoted_message, "Alice");
     CHECK(model.messages().back().reply_to == quoted_message);
     CHECK(model.messages().back().reply_to_sender == "Alice");
     CHECK(model.find_message(lora_chat_protocol::message_id("67")) == &model.messages().back());
@@ -212,14 +212,14 @@ int main()
     CHECK(decoded_maximum.nickname == maximum_name);
     CHECK(!decoded_maximum.has_reply);
 
-    const std::string maximum_reply_payload =
-        lora_chat_protocol::encode(maximum_reply, maximum_name, maximum_message);
+    const std::string maximum_reply_payload = lora_chat_protocol::encode(maximum_reply, maximum_name, maximum_message);
     CHECK(maximum_reply_payload.size() == lora_chat_protocol::kRadioPayloadBytes);
     const auto decoded_reply = lora_chat_protocol::decode(maximum_reply_payload);
     CHECK(decoded_reply.message == maximum_reply);
     CHECK(decoded_reply.nickname == maximum_name);
     CHECK(decoded_reply.has_reply);
     CHECK(decoded_reply.reply_id == lora_chat_protocol::message_id(maximum_message));
-    CHECK(lora_chat_protocol::encode(std::string(lora_chat_protocol::kMaxReplyMessageBytes + 1, 'x'),
-                                     maximum_name, maximum_message).empty());
+    CHECK(lora_chat_protocol::encode(std::string(lora_chat_protocol::kMaxReplyMessageBytes + 1, 'x'), maximum_name,
+                                     maximum_message)
+              .empty());
 }

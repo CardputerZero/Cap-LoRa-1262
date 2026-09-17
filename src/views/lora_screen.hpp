@@ -37,20 +37,29 @@ inline uint32_t normalize_lora_key(uint32_t key, LoraView view) noexcept
     }
     return key;
 }
+
+inline constexpr bool is_desktop_help_key(uint32_t key, LoraEditorMode editor_mode, bool help_visible,
+                                          bool desktop) noexcept
+{
+    return desktop && (help_visible || editor_mode == LoraEditorMode::NONE) && (key == 'h' || key == 'H');
 }
+}  // namespace lora_app_detail
 
 class LoraScreen {
 public:
     LoraScreen();
     ~LoraScreen();
-    LoraScreen(const LoraScreen&) = delete;
-    LoraScreen& operator=(const LoraScreen&) = delete;
+    LoraScreen(const LoraScreen &)            = delete;
+    LoraScreen &operator=(const LoraScreen &) = delete;
 
-    void onEnter(lv_obj_t* parent);
+    void onEnter(lv_obj_t *parent);
     void onExit();
     void tick(uint32_t now_ms);
     bool handleKey(uint32_t key);
-    bool active() const noexcept { return app_active_; }
+    bool active() const noexcept
+    {
+        return app_active_;
+    }
 
 private:
     enum class ClipboardNotice : uint8_t { None, Copied, Pasted, PastedTruncated, Wait };
@@ -83,6 +92,7 @@ private:
     bool app_active_               = false;
     bool initialization_pending_   = false;
     bool scroll_to_latest_pending_ = false;
+    bool desktop_help_pressed_     = false;
     cap_lora::LoraInfo lora_info_{};
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
     std::thread init_thread_;
@@ -91,7 +101,7 @@ private:
     std::string pending_tx_text_;
     std::string clipboard_text_;
 
-    lv_timer_t *poll_timer_ = nullptr;
+    lv_timer_t *poll_timer_             = nullptr;
     lv_timer_t *message_title_timer_    = nullptr;
     lv_timer_t *clipboard_notice_timer_ = nullptr;
     ClipboardNotice clipboard_notice_   = ClipboardNotice::None;
@@ -112,18 +122,18 @@ private:
     lv_obj_t *info_table_               = nullptr;
     lv_obj_t *info_table_content_       = nullptr;
     std::array<lv_obj_t *, INFO_ROW_COUNT> info_value_labels_{};
-    lv_obj_t *send_view_                = nullptr;
-    lv_obj_t *send_title_label_         = nullptr;
-    lv_obj_t *send_input_bubble_        = nullptr;
-    lv_obj_t *send_input_label_         = nullptr;
-    lv_obj_t *send_cursor_label_        = nullptr;
-    lv_obj_t *send_status_label_        = nullptr;
-    lv_obj_t *send_cancel_button_       = nullptr;
-    lv_obj_t *send_confirm_button_      = nullptr;
-    lv_obj_t *page_indicator_           = nullptr;
-    lv_obj_t *page_dots_[2]             = {nullptr, nullptr};
-    lv_obj_t *active_view_              = nullptr;
-    lv_obj_t *root_screen_              = nullptr;
+    lv_obj_t *send_view_           = nullptr;
+    lv_obj_t *send_title_label_    = nullptr;
+    lv_obj_t *send_input_bubble_   = nullptr;
+    lv_obj_t *send_input_label_    = nullptr;
+    lv_obj_t *send_cursor_label_   = nullptr;
+    lv_obj_t *send_status_label_   = nullptr;
+    lv_obj_t *send_cancel_button_  = nullptr;
+    lv_obj_t *send_confirm_button_ = nullptr;
+    lv_obj_t *page_indicator_      = nullptr;
+    lv_obj_t *page_dots_[2]        = {nullptr, nullptr};
+    lv_obj_t *active_view_         = nullptr;
+    lv_obj_t *root_screen_         = nullptr;
 
     static void set_visible(lv_obj_t *object, bool visible);
 
