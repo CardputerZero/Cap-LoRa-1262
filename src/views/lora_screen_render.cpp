@@ -612,14 +612,33 @@ void LoraScreen::create_help_view()
                             lv_color_hex(0x000000), LV_OPA_COVER, 0);
     if (!help_view_) return;
     lv_obj_add_event_cb(help_view_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
-    make_label(help_view_, "esc", 8, 4, 32, 14, &lv_font_montserrat_10, lv_color_hex(0xF2C94C),
+    make_label(help_view_, "ESC:Close", 8, 2, 130, 22, &lv_font_montserrat_14, lv_color_hex(0xF2C94C),
                LV_TEXT_ALIGN_LEFT);
-    make_label(help_view_,
-               "Connect Cap LoRa-1262 to send and receive messages over LoRa, with support for group communication "
-               "between multiple devices.\n\nFeatures: nickname, message selection and replies, copy and paste, plus radio "
-               "and link details in Info.\n\nKeyboard: compose a message\nF / X / Z / C: switch between screens\n"
-               "Fn + F / X: select a message\nEnter: reply to selection\nCtrl + C / V: copy / paste",
-               8, 20, 304, 146, &lv_font_montserrat_10, lv_color_hex(0xE4E4E4), LV_TEXT_ALIGN_LEFT);
+    make_label(help_view_, "Help", 130, 2, 60, 22, &lv_font_montserrat_18, lv_color_hex(0x4778B8),
+               LV_TEXT_ALIGN_CENTER);
+    help_content_ = make_plain_container(help_view_, 0, 26, lora_app_detail::kScreenWidth,
+                                         lora_app_detail::kScreenHeight - 26);
+    if (!help_content_) return;
+    lv_obj_add_event_cb(help_content_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
+    lv_obj_add_flag(help_content_, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scroll_dir(help_content_, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(help_content_, LV_SCROLLBAR_MODE_ON);
+    lv_obj_set_style_width(help_content_, lora_app_detail::kInfoScrollbarWidth, LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_color(help_content_, lv_color_hex(0x4E5157), LV_PART_SCROLLBAR);
+    lv_obj_set_style_bg_opa(help_content_, LV_OPA_COVER, LV_PART_SCROLLBAR);
+    lv_obj_set_style_radius(help_content_, lora_app_detail::kInfoScrollbarWidth / 2, LV_PART_SCROLLBAR);
+    make_label(help_content_,
+               "Cap LoRa-1262 sends group messages over LoRa. Devices must use matching radio settings.\n\n"
+               "Chat\nType or Enter: new message\nZ / C: switch pages\n"
+               "F / X or Up / Down: select a message\nEsc: clear selection\nEnter: reply to selection\n"
+               "Ctrl + C: copy selected message\n\n"
+               "Editor\nEnter: send or save\nEsc: cancel\nFn + arrows: move cursor\nFn + N: end of text\n"
+               "Ctrl + V: paste copied text\n\n"
+               "Info\nView radio and link details. Up / Down: scroll. Enter: change nickname (10 bytes max).\n\n"
+               "Messages: 116 bytes max, or 107 bytes when replying.\n\n"
+               "Sending or failed messages can be copied, but not replied to.\n\n"
+               "Fn + H: open Help\nUp / Down: scroll Help",
+               8, 0, 296, LV_SIZE_CONTENT, &lv_font_montserrat_14, lv_color_hex(0xE4E4E4), LV_TEXT_ALIGN_LEFT);
     set_visible(help_view_, false);
 }
 
@@ -798,6 +817,7 @@ void LoraScreen::detach_delete_callbacks()
 {
     lv_obj_t *objects[] = {message_list_,
                            help_view_,
+                           help_content_,
                            messages_view_,
                            empty_message_label_,
                            empty_message_hint_label_,
@@ -830,7 +850,8 @@ void LoraScreen::detach_delete_callbacks()
 void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
 {
     if (!deleted) return;
-    if (deleted == help_view_) help_view_ = nullptr;
+    if (deleted == help_content_) help_content_ = nullptr;
+    if (deleted == help_view_) { help_view_ = nullptr; help_content_ = nullptr; }
     if (deleted == messages_title_) {
         lv_anim_del(deleted, &LoraScreen::message_title_anim_exec_cb);
         messages_title_ = nullptr;
@@ -903,6 +924,7 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
     if (deleted == page_root_) {
         page_root_                = nullptr;
         help_view_                = nullptr;
+        help_content_             = nullptr;
         messages_view_            = nullptr;
         message_list_             = nullptr;
         empty_message_label_      = nullptr;

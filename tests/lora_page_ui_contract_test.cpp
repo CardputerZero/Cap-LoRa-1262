@@ -60,14 +60,14 @@ constexpr unsigned kRadioOffColor = 0xD96C6C;
 constexpr unsigned kReceivingColor = 0x69AD80;
 constexpr unsigned kClipboardNoticeColor = 0x5BA7FF;
 
-constexpr std::array<std::string_view, 33> kRequiredTexts = {
+constexpr std::array<std::string_view, 36> kRequiredTexts = {
     "No messages yet", "Type anything to send", "Initializing LoRa...", "LoRa unavailable; see Info",
     "Messages", "LoRa Info", "CLIENT", "DEVICE", "RSSI", "SNR", "LINK", "New Message",
     "ESC: Cancel", "Enter: Send", "LoRa is still initializing", "LoRa unavailable", "Message is empty",
     "Send failed", "Unavailable", "Link configuration unavailable", "No diagnostics", "Reply Message", "Reply: ",
-    "copied", "pasted", "pasted (truncated)", "Connect Cap LoRa-1262", "Keyboard: compose a message",
-    "F / X / Z / C: switch between screens", "Features: nickname", "Fn + F / X: select a message",
-    "Ctrl + C / V: copy / paste", "esc",
+    "copied", "pasted", "pasted (truncated)", "Cap LoRa-1262 sends group messages", "Z / C: switch pages",
+    "Up / Down: scroll.", "F / X or Up / Down: select a message", "Ctrl + V: paste copied text", "ESC:Close", "Help",
+    "Fn + H: open Help", "Messages: 116 bytes max", "Sending or failed messages can be copied",
 };
 
 enum class RadioState { initializing, radio_off, sending, tx_mode, receiving };

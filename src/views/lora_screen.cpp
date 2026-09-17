@@ -165,6 +165,12 @@ bool LoraScreen::handleKey(uint32_t key)
     if (!app_active_) return false;
     if (help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN)) {
         if (key == LV_KEY_ESC) hide_help();
+        else if (help_content_ && (key == LV_KEY_UP || key == LV_KEY_DOWN || key == 'f' || key == 'F' ||
+                                   key == 'x' || key == 'X'))
+            lv_obj_scroll_by_bounded(help_content_, 0,
+                                     key == LV_KEY_UP || key == 'f' || key == 'F' ? lora_app_detail::kMessageScrollStep
+                                                                                   : -lora_app_detail::kMessageScrollStep,
+                                     LV_ANIM_ON);
         return true;
     }
     if (key == cap_gps::keyCommandValue(cap_gps::KeyCommand::Help)) {
@@ -446,6 +452,7 @@ void LoraScreen::show_help()
 {
     if (!help_view_) return;
     clear_clipboard_notice();
+    if (help_content_) lv_obj_scroll_to_y(help_content_, 0, LV_ANIM_OFF);
     set_visible(help_view_, true);
     lv_obj_move_foreground(help_view_);
 }

@@ -97,6 +97,7 @@ private:
     ClipboardNotice clipboard_notice_   = ClipboardNotice::None;
     lv_obj_t *page_root_                = nullptr;
     lv_obj_t *help_view_                = nullptr;
+    lv_obj_t *help_content_             = nullptr;
     lv_obj_t *messages_view_            = nullptr;
     lv_obj_t *message_list_             = nullptr;
     lv_obj_t *messages_title_           = nullptr;
