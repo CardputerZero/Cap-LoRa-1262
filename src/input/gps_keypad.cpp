@@ -42,9 +42,10 @@ bool hasAppKeys(int fd)
            testBit(key_bits, KEY_RIGHT) || testBit(key_bits, KEY_F) || testBit(key_bits, KEY_X) ||
            testBit(key_bits, KEY_Z) || testBit(key_bits, KEY_C) || testBit(key_bits, KEY_SPACE) ||
            testBit(key_bits, KEY_A) || testBit(key_bits, KEY_BACKSPACE) || testBit(key_bits, KEY_0) ||
-           testBit(key_bits, KEY_TAB) || testBit(key_bits, KEY_1) || testBit(key_bits, KEY_2) ||
-           testBit(key_bits, KEY_3) || testBit(key_bits, KEY_4) || testBit(key_bits, KEY_5) ||
-           testBit(key_bits, KEY_6) || testBit(key_bits, KEY_7) || testBit(key_bits, KEY_8) || testBit(key_bits, KEY_9);
+           testBit(key_bits, KEY_TAB) || testBit(key_bits, KEY_HELP) || testBit(key_bits, KEY_1) ||
+           testBit(key_bits, KEY_2) || testBit(key_bits, KEY_3) || testBit(key_bits, KEY_4) ||
+           testBit(key_bits, KEY_5) || testBit(key_bits, KEY_6) || testBit(key_bits, KEY_7) ||
+           testBit(key_bits, KEY_8) || testBit(key_bits, KEY_9);
 }
 
 bool envEnabled(const char* name, bool fallback)
@@ -86,10 +87,10 @@ struct Tca8418KeymapEntry {
 constexpr Tca8418KeymapEntry kTca8418Keymap[] = {
     // These are the keycodes emitted by the TCA8418 driver's Sym layer.
     // Keep this table in sync with tca8418_keypad_m5stack_keymap.map.
-    {26, '!'},  {27, '@'},  {39, '#'},  {40, '$'},  {41, '%'},  {43, '^'},  {51, '&'},  {52, '*'},
-    {53, '('},  {94, ')'},  {55, '~'},  {69, '`'},  {70, '_'},  {71, '-'},  {72, '+'},  {73, '='},
-    {74, '['},  {75, ']'},  {76, '{'},  {77, '}'},  {79, ';'},  {80, ':'},  {81, '\''}, {82, '"'},
-    {83, '<'},  {85, '>'},  {86, '\\'}, {89, '|'},  {90, ','},  {91, '.'},  {92, '/'},  {93, '?'},
+    {26, '!'}, {27, '@'}, {39, '#'},  {40, '$'}, {41, '%'}, {43, '^'}, {51, '&'},  {52, '*'},
+    {53, '('}, {94, ')'}, {55, '~'},  {69, '`'}, {70, '_'}, {71, '-'}, {72, '+'},  {73, '='},
+    {74, '['}, {75, ']'}, {76, '{'},  {77, '}'}, {79, ';'}, {80, ':'}, {81, '\''}, {82, '"'},
+    {83, '<'}, {85, '>'}, {86, '\\'}, {89, '|'}, {90, ','}, {91, '.'}, {92, '/'},  {93, '?'},
 };
 
 uint32_t tca8418Utf8(uint16_t code)
@@ -162,7 +163,7 @@ bool GpsKeypad::openDevice(const std::string& path, bool require_app_keys)
     // APPLaunch reads this same evdev node to detect the exit gesture and send
     // the termination signals. An exclusive grab would disable that watchdog.
     const bool app_launch_managed = std::getenv("APPLAUNCH_LINUX_KEYBOARD_DEVICE") != nullptr;
-    const bool grab_input        = grab_requested && !app_launch_managed;
+    const bool grab_input         = grab_requested && !app_launch_managed;
     if (grab_requested && app_launch_managed) {
         spdlog::warn("GpsKeypad: ignoring CAP_LORA_KEYBOARD_GRAB under APPLaunch supervision");
     }

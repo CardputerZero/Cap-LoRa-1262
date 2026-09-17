@@ -71,8 +71,10 @@ LV_SDL_ZOOM=2 ./dist/sdl/Cap-LoRa-1262
 Key controls:
 
 - `Z`/`C` or Left/Right: switch between Messages and Info
-- `F`/`X` or Up/Down: scroll messages or switch views
-- Enter: compose a message or retry initialization after an error
+- `F`/`X` or Up/Down: select a message or scroll Info; `Fn+F`/`Fn+X` selects messages
+- Enter: compose a message or reply to the selected message
+- `Ctrl+C`/`Ctrl+V`: copy the selected message or paste into the editor
+- `Fn+H` (`H` on desktop): open Help; Esc closes it
 - Esc: close a dialog or exit
 
 The SDL build displays the complete LoRa UI and uses a simulated backend for
