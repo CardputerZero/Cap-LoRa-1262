@@ -95,6 +95,10 @@ int main()
     CHECK(model.view() == LoraView::INFO);
     CHECK(model.editor_mode() == LoraEditorMode::NICKNAME);
     CHECK(model.tx_input() == "Alice");
+    model.reset_after_initialization(false);
+    CHECK(model.editor_mode() == LoraEditorMode::NICKNAME);
+    CHECK(model.view() == LoraView::INFO);
+    CHECK(model.tx_input() == "Alice");
     while (model.tx_input().size() < lora_chat_protocol::kMaxNicknameBytes) CHECK(model.append_character('x'));
     const std::string maximum_nickname = model.tx_input();
     CHECK(!model.append_character('y'));

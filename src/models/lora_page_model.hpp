@@ -31,6 +31,10 @@ public:
     static constexpr size_t TX_INPUT_LIMIT = lora_chat_protocol::kMaxMessageBytes;
 
     void reset(bool hardware_ready);
+    // Initialization can finish while the user is editing a message or
+    // nickname. Preserve that editor so the asynchronous refresh cannot
+    // discard the input or switch away from the editor view.
+    void reset_after_initialization(bool hardware_ready);
     void set_view(LoraView view) { view_ = view; }
     LoraView view() const { return view_; }
 

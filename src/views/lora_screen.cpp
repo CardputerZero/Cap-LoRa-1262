@@ -297,7 +297,9 @@ bool LoraScreen::consume_lora_initialization()
     lora_info_              = info;
     lora_info_.rx_event     = 0;
     lora_info_.tx_event     = 0;
-    model_.reset(lora_info_.hw_ready != 0);
+    // Initialization is asynchronous. Keep an active message or nickname
+    // editor intact when the poll timer consumes its result.
+    model_.reset_after_initialization(lora_info_.hw_ready != 0);
     if (lora_info_.hw_ready) {
         lv_label_set_text(empty_message_hint_label_, "Type anything to send");
         lv_obj_set_style_text_color(empty_message_hint_label_, lv_color_hex(0x5FE492), LV_PART_MAIN | LV_STATE_DEFAULT);

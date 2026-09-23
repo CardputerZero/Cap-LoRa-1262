@@ -17,6 +17,12 @@ void LoraPageModel::reset(bool hardware_ready)
     selected_message_index_.reset();
 }
 
+void LoraPageModel::reset_after_initialization(bool hardware_ready)
+{
+    if (editor_mode_ != LoraEditorMode::NONE) return;
+    reset(hardware_ready);
+}
+
 void LoraPageModel::begin_send(char first_character)
 {
     view_ = LoraView::SEND;
