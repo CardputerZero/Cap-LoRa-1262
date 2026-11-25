@@ -1,9 +1,11 @@
 #include "models/lora_nickname_store.hpp"
+#include "models/lora_radio_preferences.hpp"
 
 #include "models/lora_chat_protocol.hpp"
 
 #include <algorithm>
 #include <cerrno>
+#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -15,11 +17,11 @@
 #include <unistd.h>
 #include <vector>
 
-namespace lora_nickname_store {
 namespace {
 
 constexpr char kConfigDirectoryName[] = "Cap-LoRa-1262";
 constexpr char kNicknameFileName[]     = "nickname";
+constexpr char kRadioFileName[]        = "radio";
 
 struct UserConfigLocation {
     std::filesystem::path directory;
@@ -51,42 +53,30 @@ std::filesystem::path nickname_path()
     return user_config_location().directory / kNicknameFileName;
 }
 
-std::string current_user_name()
+bool read_config_integer(std::ifstream& input, int& value)
 {
-    const char* username = std::getenv("SUDO_USER");
-    if (!username || username[0] == '\0') {
-        const passwd* account = getpwuid(geteuid());
-        username = account && account->pw_name && account->pw_name[0] != '\0' ? account->pw_name : "LoRa";
-    }
-    std::string nickname{username};
-    nickname.resize(std::min(nickname.size(), lora_chat_protocol::kMaxNicknameBytes));
-    return nickname;
+    std::string line;
+    if (!std::getline(input, line) || line.empty()) return false;
+    const auto end    = line.data() + line.size();
+    const auto parsed = std::from_chars(line.data(), end, value);
+    return parsed.ec == std::errc{} && parsed.ptr == end;
 }
 
-}  // namespace
-
-std::string load_or_default()
+UserConfigLocation radio_config_location()
 {
-    const auto path = nickname_path();
-    std::ifstream input(path);
-    std::string nickname;
-    if (input.is_open()) std::getline(input, nickname);
-    if (valid_nickname(nickname)) {
-        spdlog::info("LoRa nickname: loaded from {}", path.string());
-        return nickname;
+    auto location = user_config_location();
+    const char* config_home = std::getenv("XDG_CONFIG_HOME");
+    const char* sudo_user = std::getenv("SUDO_USER");
+    if (config_home && config_home[0] == '/' && !(sudo_user && sudo_user[0])) {
+        location.directory = std::filesystem::path(config_home) / kConfigDirectoryName;
     }
-    return current_user_name();
+    return location;
 }
 
-bool save(const std::string& nickname, std::string& error)
+bool save_config(const UserConfigLocation& location, const char* filename, std::string_view contents,
+                 std::string& error)
 {
-    if (!valid_nickname(nickname)) {
-        error = "invalid nickname";
-        return false;
-    }
-
-    const auto location = user_config_location();
-    const auto path     = location.directory / kNicknameFileName;
+    const auto path = location.directory / filename;
     std::error_code filesystem_error;
     std::filesystem::create_directories(location.directory, filesystem_error);
     if (filesystem_error) {
@@ -109,7 +99,7 @@ bool save(const std::string& nickname, std::string& error)
     temporary_buffer.push_back('\0');
     const int temporary_fd = mkstemp(temporary_buffer.data());
     if (temporary_fd < 0) {
-        error = "cannot create nickname file: " + std::string(std::strerror(errno));
+        error = "cannot create configuration file: " + std::string(std::strerror(errno));
         return false;
     }
     const std::filesystem::path temporary{temporary_buffer.data()};
@@ -119,11 +109,11 @@ bool save(const std::string& nickname, std::string& error)
     };
 
     std::size_t offset = 0;
-    while (offset < nickname.size()) {
-        const ssize_t written = write(temporary_fd, nickname.data() + offset, nickname.size() - offset);
+    while (offset < contents.size()) {
+        const ssize_t written = write(temporary_fd, contents.data() + offset, contents.size() - offset);
         if (written < 0 && errno == EINTR) continue;
         if (written <= 0) {
-            error = "cannot write nickname: " + std::string(std::strerror(errno));
+            error = "cannot write configuration: " + std::string(std::strerror(errno));
             discard_temporary();
             return false;
         }
@@ -131,12 +121,12 @@ bool save(const std::string& nickname, std::string& error)
     }
     if ((geteuid() == 0 && fchown(temporary_fd, location.uid, location.gid) != 0) ||
         fchmod(temporary_fd, S_IRUSR | S_IWUSR) != 0 || fsync(temporary_fd) != 0) {
-        error = "cannot finalize nickname: " + std::string(std::strerror(errno));
+        error = "cannot finalize configuration: " + std::string(std::strerror(errno));
         discard_temporary();
         return false;
     }
     if (close(temporary_fd) != 0) {
-        error = "cannot close nickname: " + std::string(std::strerror(errno));
+        error = "cannot close configuration: " + std::string(std::strerror(errno));
         std::filesystem::remove(temporary, filesystem_error);
         return false;
     }
@@ -146,8 +136,85 @@ bool save(const std::string& nickname, std::string& error)
         std::filesystem::remove(temporary, filesystem_error);
         return false;
     }
-    spdlog::info("LoRa nickname: saved to {}", path.string());
+    return true;
+}
+
+std::string current_user_name()
+{
+    const char* username = std::getenv("SUDO_USER");
+    if (!username || username[0] == '\0') {
+        const passwd* account = getpwuid(geteuid());
+        username = account && account->pw_name && account->pw_name[0] != '\0' ? account->pw_name : "LoRa";
+    }
+    std::string nickname{username};
+    nickname.resize(std::min(nickname.size(), lora_chat_protocol::kMaxNicknameBytes));
+    return nickname;
+}
+
+}  // namespace
+
+namespace lora_nickname_store {
+
+std::string load_or_default()
+{
+    const auto path = nickname_path();
+    std::ifstream input(path);
+    std::string nickname;
+    if (input.is_open()) std::getline(input, nickname);
+    if (valid_nickname(nickname)) {
+        spdlog::info("LoRa nickname: loaded from {}", path.string());
+        return nickname;
+    }
+    return current_user_name();
+}
+
+bool save(const std::string& nickname, std::string& error)
+{
+    if (!valid_nickname(nickname)) {
+        error = "invalid nickname";
+        return false;
+    }
+
+    const auto location = user_config_location();
+    if (!save_config(location, kNicknameFileName, nickname, error)) return false;
+    spdlog::info("LoRa nickname: saved to {}", (location.directory / kNicknameFileName).string());
     return true;
 }
 
 }  // namespace lora_nickname_store
+
+namespace cap_lora {
+
+RadioPreferences load_radio_preferences()
+{
+    std::ifstream input(radio_config_location().directory / kRadioFileName);
+    std::string line;
+    if (!std::getline(input, line) ||
+        (line != "skip-notice" && line != "show-notice" && line != "notice-accepted")) return {};
+
+    RadioPreferences preferences;
+    // Older files recorded Continue even without an explicit opt-out.
+    preferences.skip_notice = line == "skip-notice";
+    int frequency_khz = 0;
+    int tx_power_dbm = 0;
+    if (read_config_integer(input, frequency_khz)) {
+        preferences.settings.frequency_khz = frequency_khz;
+    }
+    if (read_config_integer(input, tx_power_dbm)) {
+        preferences.settings.tx_power_dbm = tx_power_dbm;
+    }
+    return preferences;
+}
+
+bool save_radio_preferences(const RadioPreferences& preferences, std::string& error)
+{
+    const auto &settings = preferences.settings;
+    std::string contents = preferences.skip_notice ? "skip-notice\n" : "show-notice\n";
+    if (settings.valid_frequency() || settings.valid_power()) {
+        contents += std::to_string(settings.valid_frequency() ? settings.frequency_khz : 0) + '\n';
+        contents += std::to_string(settings.valid_power() ? settings.tx_power_dbm : kUnsetTxPowerDbm) + '\n';
+    }
+    return save_config(radio_config_location(), kRadioFileName, contents, error);
+}
+
+}  // namespace cap_lora

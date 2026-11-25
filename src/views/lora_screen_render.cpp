@@ -184,6 +184,9 @@ void LoraScreen::update_info_content()
     if (initialization_pending_) {
         state_text  = "INITIALIZING";
         state_color = 0xC9A45C;
+    } else if (!radio_preferences_.settings.complete()) {
+        state_text  = "SETUP NEEDED";
+        state_color = 0xC9A45C;
     } else if (!lora_info_.hw_ready) {
         state_text  = "RADIO OFF";
         state_color = 0xD96C6C;
@@ -210,8 +213,9 @@ void LoraScreen::update_info_content()
         set_row(InfoRowId::Snr, "--");
     }
     set_row(InfoRowId::Radio, "SX1262");
-    std::snprintf(value, sizeof(value), "%.3f MHz", lora_info_.frequency_mhz);
-    set_row(InfoRowId::Frequency, value);
+    const auto &settings = radio_preferences_.settings;
+    if (settings.valid_frequency()) std::snprintf(value, sizeof(value), "%.3f MHz", settings.frequency_mhz());
+    set_row(InfoRowId::Frequency, settings.valid_frequency() ? value : "Unset");
     std::snprintf(value, sizeof(value), "v%s", CAP_LORA_APP_VERSION);
     set_row(InfoRowId::Version, value);
     set_row(InfoRowId::Modulation, "LoRa");
@@ -221,8 +225,8 @@ void LoraScreen::update_info_content()
     set_row(InfoRowId::SpreadingFactor, value);
     std::snprintf(value, sizeof(value), "4/%u", static_cast<unsigned>(lora_info_.coding_rate));
     set_row(InfoRowId::CodingRate, value);
-    std::snprintf(value, sizeof(value), "%d dBm", static_cast<int>(lora_info_.output_power_dbm));
-    set_row(InfoRowId::Power, value);
+    if (settings.valid_power()) std::snprintf(value, sizeof(value), "%d dBm", settings.tx_power_dbm);
+    set_row(InfoRowId::Power, settings.valid_power() ? value : "Unset");
     std::snprintf(value, sizeof(value), "%u symbols", static_cast<unsigned>(lora_info_.preamble_symbols));
     set_row(InfoRowId::Preamble, value);
     std::snprintf(value, sizeof(value), "0x%02X", static_cast<unsigned>(lora_info_.sync_word));
@@ -242,7 +246,10 @@ void LoraScreen::update_info_content()
     set_row(InfoRowId::SpiDevice, value);
     set_row(InfoRowId::Pi4io, lora_app_detail::short_pi4io_status(lora_info_.pi4io_status));
 
-    if (initialization_pending_ || !lora_info_.hw_ready) {
+    if (!settings.complete()) {
+        lv_label_set_text(info_stats_label_, "Set frequency and TX power to use LoRa");
+        lv_obj_set_style_text_color(info_stats_label_, lv_color_hex(0xC9A45C), LV_PART_MAIN);
+    } else if (initialization_pending_ || !lora_info_.hw_ready) {
         lv_label_set_text(info_stats_label_, lora_app_detail::safe_text(lora_info_.diag, "No diagnostics"));
         lv_obj_set_style_text_color(info_stats_label_, lv_color_hex(initialization_pending_ ? 0xC9A45C : 0xD96C6C),
                                     LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -583,6 +590,8 @@ void LoraScreen::render_current_view()
     if (!show_send && !show_nickname) update_page_indicator();
     if (show_messages && scroll_to_latest_pending_ && !model_.selected_message_index()) scroll_to_latest(LV_ANIM_OFF);
     if (help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN)) lv_obj_move_foreground(help_view_);
+    if (radio_dialog_ == RadioDialog::Notice) lv_obj_move_foreground(radio_notice_);
+    if (radio_dialog_ == RadioDialog::Setup) lv_obj_move_foreground(radio_setup_);
 }
 
 void LoraScreen::create_ui()
@@ -596,12 +605,13 @@ void LoraScreen::create_ui()
     create_send_view();
     create_page_indicator();
     create_help_view();
+    create_radio_dialogs();
     lv_obj_t *persistent_children[] = {
         empty_message_label_,     empty_message_hint_label_, info_status_dot_,         info_status_label_,
         info_change_name_button_, info_stats_label_,         info_table_,              info_table_content_,
         send_title_label_,        send_input_bubble_,        send_input_label_,        send_cursor_label_,
         send_status_label_,       send_cancel_button_,       send_confirm_button_,     page_dots_[0],
-        page_dots_[1],            messages_title_};
+        page_dots_[1],            messages_title_,          info_radio_settings_};
     for (lv_obj_t *object : persistent_children) track_owned_handle(object);
     for (lv_obj_t *object : info_value_labels_) track_owned_handle(object);
 }
@@ -634,7 +644,8 @@ void LoraScreen::create_help_view()
                "Ctrl + C: copy selected message\n\n"
                "Editor\nEnter: send or save\nEsc: cancel\nFn + arrows: move cursor\nFn + N: end of text\n"
                "Ctrl + V: paste copied text\n\n"
-               "Info\nView radio and link details. Up / Down: scroll. Enter: change nickname (10 bytes max).\n\n"
+               "Info\nView radio and link details. Up / Down: scroll. Enter: change nickname (10 bytes max). "
+               "S: set frequency and TX power.\n\n"
                "Messages: 116 bytes max, or 107 bytes when replying.\n\n"
                "Sending or failed messages can be copied, but not replied to.\n\n"
                "Fn + H: open Help\nUp / Down: scroll Help",
@@ -679,6 +690,12 @@ void LoraScreen::create_info_view()
     lv_obj_add_event_cb(info_view_, static_owned_obj_delete_cb, LV_EVENT_DELETE, this);
     make_label(info_view_, "LoRa Info", 0, 0, 320, 18, &lv_font_montserrat_14, lv_color_hex(0xE4E4E4),
                LV_TEXT_ALIGN_CENTER);
+    info_radio_settings_ = make_action_button(info_view_, 206, 0, 109, "S: Settings", lv_color_hex(0x272727),
+                                             lv_color_hex(0xFED40D), radio_dialog_click_cb);
+    if (info_radio_settings_) {
+        lv_obj_set_height(info_radio_settings_, 18);
+        if (auto *label = lv_obj_get_child(info_radio_settings_, 0)) lv_obj_center(label);
+    }
     info_status_dot_ = make_panel(info_view_, 8, 27, 6, 6, lv_color_hex(0x69AD80), LV_OPA_COVER, LV_RADIUS_CIRCLE);
     info_status_label_ =
         make_label(info_view_, "", 20, 22, 160, 18, &lv_font_montserrat_14, lv_color_hex(0xDDE0E4), LV_TEXT_ALIGN_LEFT);
@@ -803,6 +820,11 @@ void LoraScreen::track_owned_handle(lv_obj_t *object)
 
 bool LoraScreen::ui_ready() const
 {
+    if (!info_radio_settings_ || !radio_notice_ || !radio_notice_skip_ || !radio_notice_ok_ || !radio_setup_ ||
+        !radio_setup_status_ || !radio_setup_save_ || !radio_setup_close_ || !lv_obj_get_child(radio_setup_close_, 0))
+        return false;
+    for (std::size_t i = 0; i < radio_rows_.size(); ++i)
+        if (!radio_rows_[i] || !radio_values_[i] || !radio_arrows_[i][0] || !radio_arrows_[i][1]) return false;
     if (!lora_page_controls_ready(page_root_, messages_view_, message_list_, empty_message_label_,
                                   empty_message_hint_label_, info_view_, info_status_dot_, info_status_label_,
                                   info_change_name_button_, info_stats_label_, info_table_, info_table_content_,
@@ -826,6 +848,7 @@ void LoraScreen::detach_delete_callbacks()
                            info_status_dot_,
                            info_status_label_,
                            info_change_name_button_,
+                           info_radio_settings_,
                            info_stats_label_,
                            info_table_,
                            info_table_content_,
@@ -840,6 +863,8 @@ void LoraScreen::detach_delete_callbacks()
                            page_indicator_,
                            page_dots_[0],
                            page_dots_[1],
+                           radio_notice_,
+                           radio_setup_,
                            page_root_};
     for (lv_obj_t *object : objects)
         if (object) lv_obj_remove_event_cb_with_user_data(object, static_owned_obj_delete_cb, this);
@@ -861,6 +886,12 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
     if (deleted == info_status_dot_) info_status_dot_ = nullptr;
     if (deleted == info_status_label_) info_status_label_ = nullptr;
     if (deleted == info_change_name_button_) info_change_name_button_ = nullptr;
+    if (deleted == info_radio_settings_) info_radio_settings_ = nullptr;
+    if (deleted == radio_notice_ || deleted == radio_setup_) {
+        if (deleted == radio_notice_) radio_notice_ = nullptr;
+        if (deleted == radio_setup_) radio_setup_ = nullptr;
+        app_active_ = false;
+    }
     if (deleted == info_stats_label_) info_stats_label_ = nullptr;
     if (deleted == info_table_) info_table_ = nullptr;
     if (deleted == info_table_content_) info_table_content_ = nullptr;
@@ -895,6 +926,7 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
         info_status_dot_   = nullptr;
         info_status_label_ = nullptr;
         info_change_name_button_ = nullptr;
+        info_radio_settings_     = nullptr;
         info_stats_label_        = nullptr;
         info_table_              = nullptr;
         info_table_content_      = nullptr;
@@ -934,6 +966,9 @@ void LoraScreen::clear_deleted_handles(lv_obj_t *deleted)
         info_status_dot_          = nullptr;
         info_status_label_        = nullptr;
         info_change_name_button_  = nullptr;
+        info_radio_settings_      = nullptr;
+        radio_notice_             = nullptr;
+        radio_setup_              = nullptr;
         info_stats_label_         = nullptr;
         info_table_               = nullptr;
         info_table_content_       = nullptr;

@@ -62,7 +62,7 @@ static bool is_menu_next_key(uint32_t key)
 namespace {
 
 void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitializationState> &state,
-                             cap_lora::CapLoRa1262 *device) noexcept
+                             cap_lora::CapLoRa1262 *device, cap_lora::RadioSettings settings) noexcept
 {
     int init_code    = -1;
     int info_code    = -1;
@@ -72,7 +72,7 @@ void run_lora_initialization(const std::shared_ptr<lora_app_detail::LoraInitiali
     try {
         const auto cancelled = [&] { return state->stop_requested.load(std::memory_order_acquire); };
         if (!cancelled()) {
-            init_code = device && device->initialize() ? 0 : -1;
+            init_code = device && device->initialize(settings) ? 0 : -1;
             if (!cancelled()) {
                 if (device) device->get_info(&info, false);
                 info_code = 0;
@@ -122,6 +122,9 @@ void LoraScreen::onEnter(lv_obj_t *parent)
 {
     onExit();
     desktop_help_pressed_ = false;
+    radio_dialog_         = RadioDialog::None;
+    radio_preferences_    = cap_lora::load_radio_preferences();
+    radio_notice_acknowledged_ = radio_preferences_.skip_notice;
     root_screen_          = parent ? parent : lv_screen_active();
     create_ui();
     if (!ui_ready()) {
@@ -180,6 +183,7 @@ void LoraScreen::tick(uint32_t)
 bool LoraScreen::handleKey(uint32_t key)
 {
     if (!app_active_) return false;
+    if (radio_dialog_ != RadioDialog::None) return handle_radio_dialog_key(key);
     const bool help_visible = help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN);
     // SDL delivers H as text; the Cardputer's Fn+H arrives as KeyCommand::Help.
     if (lora_app_detail::is_desktop_help_key(key, model_.editor_mode(), help_visible, LV_USE_SDL)) {
@@ -244,22 +248,28 @@ void LoraScreen::init_lora()
     last_message_row_ = nullptr;
     set_visible(empty_message_label_, true);
     set_visible(empty_message_hint_label_, true);
-    lv_label_set_text(empty_message_hint_label_, "Initializing LoRa...");
-    lv_obj_set_style_text_color(empty_message_hint_label_, lv_color_hex(0xC9A45C), LV_PART_MAIN | LV_STATE_DEFAULT);
-    std::snprintf(lora_info_.diag, sizeof(lora_info_.diag), "Initializing LoRa hardware...");
-    lora_info_.rx_event    = 0;
-    lora_info_.tx_event    = 0;
-    lora_info_.hw_ready    = 0;
-    lora_info_.initialized = 0;
+    lv_label_set_text(empty_message_hint_label_, "Open Info > Settings to use LoRa");
+    lv_obj_set_style_text_color(empty_message_hint_label_, lv_color_hex(0xC9A45C), LV_PART_MAIN);
+    lora_info_ = {};
     model_.reset(false);
     render_current_view();
     poll_timer_ = lv_timer_create(&LoraScreen::static_poll_timer_cb, lora_app_detail::kPollIntervalMs, this);
 
-    start_lora_initialization();
+    if (!radio_notice_acknowledged_) {
+        radio_dialog_ = RadioDialog::Notice;
+        set_visible(radio_notice_, true);
+        lv_obj_move_foreground(radio_notice_);
+    } else if (!radio_preferences_.settings.complete()) {
+        show_radio_setup(true);
+    } else {
+        start_lora_initialization();
+    }
 }
 
 void LoraScreen::start_lora_initialization()
 {
+    if (initialization_pending_ || !radio_notice_acknowledged_ || !radio_preferences_.settings.complete())
+        return;
     // A previous attempt (successful or failed) must be fully reaped before a
     // new one starts, otherwise two init threads could race on the global
     // backend hardware state.
@@ -268,10 +278,17 @@ void LoraScreen::start_lora_initialization()
     if (lora_device_) lora_device_->clear_stop();
 
     initialization_pending_ = true;
+    lora_info_              = {};
+    lv_label_set_text(empty_message_hint_label_, "Initializing LoRa...");
+    lv_obj_set_style_text_color(empty_message_hint_label_, lv_color_hex(0xC9A45C), LV_PART_MAIN);
+    if (model_.view() == LoraView::INFO) update_info_content();
     initialization_state_   = std::make_shared<lora_app_detail::LoraInitializationState>();
     const auto state        = initialization_state_;
+    const auto settings     = radio_preferences_.settings;
     try {
-        init_thread_ = std::thread([state, device = lora_device_.get()] { run_lora_initialization(state, device); });
+        init_thread_ = std::thread([state, device = lora_device_.get(), settings] {
+            run_lora_initialization(state, device, settings);
+        });
     } catch (...) {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->init_code    = -1;
@@ -298,8 +315,8 @@ bool LoraScreen::consume_lora_initialization()
     lora_info_.rx_event     = 0;
     lora_info_.tx_event     = 0;
     // Initialization is asynchronous. Keep an active message or nickname
-    // editor intact when the poll timer consumes its result.
-    model_.reset_after_initialization(lora_info_.hw_ready != 0);
+    // editor intact and preserve chat history when applying new settings.
+    if (model_.messages().empty()) model_.reset_after_initialization(lora_info_.hw_ready != 0);
     if (lora_info_.hw_ready) {
         lv_label_set_text(empty_message_hint_label_, "Type anything to send");
         lv_obj_set_style_text_color(empty_message_hint_label_, lv_color_hex(0x5FE492), LV_PART_MAIN | LV_STATE_DEFAULT);
@@ -583,6 +600,10 @@ bool LoraScreen::handle_navigation_key(uint32_t key)
         open_nickname_editor();
         return true;
     }
+    if (model_.view() == LoraView::INFO && (key == 's' || key == 'S')) {
+        show_radio_setup(false);
+        return true;
+    }
     if (model_.view() == LoraView::INFO && lora_app_detail::is_printable_ascii(key)) return true;
     if (key == LV_KEY_ENTER) {
         if (initialization_pending_ || !lora_info_.hw_ready) return true;
@@ -657,6 +678,7 @@ void LoraScreen::on_poll_timer()
         (void)consume_lora_initialization();
         return;
     }
+    if (!radio_notice_acknowledged_ || !radio_preferences_.settings.complete()) return;
     if (!lora_info_.hw_ready) {
         // A transient init failure (cold boot, EXT5V rail still ramping, etc.)
         // must not wedge the page permanently: retry with a backoff so the

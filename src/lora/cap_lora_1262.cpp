@@ -287,16 +287,21 @@ bool cap_lora::CapLoRa1262::service_radio()
     return true;
 }
 
-bool cap_lora::CapLoRa1262::initialize()
+bool cap_lora::CapLoRa1262::initialize(RadioSettings settings)
 {
-    if (stop_requested_.load(std::memory_order_acquire)) return false;
+    if (!settings.complete() || tx_in_progress_ || stop_requested_.load(std::memory_order_acquire)) return false;
+    if (initialized_) {
+        shutdown();
+        if (stop_requested_.load(std::memory_order_acquire)) return false;
+    }
     if (!sx1262_ && !probe()) return false;
     if (stop_requested_.load(std::memory_order_acquire)) {
         shutdown();
         return false;
     }
-    if (sx1262_->begin(FREQUENCY_MHZ, BANDWIDTH_KHZ, SPREADING_FACTOR, CODING_RATE, SYNC_WORD, OUTPUT_POWER_DBM,
-                       PREAMBLE_SYMBOLS, TCXO_VOLTAGE, false) != RADIOLIB_ERR_NONE) {
+    if (sx1262_->begin(settings.frequency_mhz(), BANDWIDTH_KHZ, SPREADING_FACTOR, CODING_RATE, SYNC_WORD,
+                       static_cast<int8_t>(settings.tx_power_dbm), PREAMBLE_SYMBOLS, TCXO_VOLTAGE,
+                       false) != RADIOLIB_ERR_NONE) {
         shutdown();
         return false;
     }
@@ -323,6 +328,7 @@ bool cap_lora::CapLoRa1262::initialize()
         shutdown();
         return false;
     }
+    radio_settings_ = settings;
     return true;
 }
 
@@ -416,8 +422,8 @@ void cap_lora::CapLoRa1262::shutdown()
     I2cInitiator_.reset();
 }
 
-bool cap_lora::CapLoRa1262::setup() { return initialize(); }
-bool cap_lora::CapLoRa1262::StartServer() { return initialize(); }
+bool cap_lora::CapLoRa1262::setup(RadioSettings settings) { return initialize(settings); }
+bool cap_lora::CapLoRa1262::StartServer(RadioSettings settings) { return initialize(settings); }
 void cap_lora::CapLoRa1262::StopServer() { shutdown(); }
 bool cap_lora::CapLoRa1262::isReady() const { return initialized_; }
 bool cap_lora::CapLoRa1262::exec_send(const char* payload) { return payload != nullptr && send(payload); }
@@ -434,6 +440,10 @@ void cap_lora::CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     std::snprintf(info->pi4io_status, sizeof(info->pi4io_status), "%s", cp0_lora_pi4io_controller::status());
     info->initialized = initialized_ ? 1 : 0;
     info->hw_ready = initialized_ ? 1 : 0;
+    if (initialized_) {
+        info->frequency_mhz    = radio_settings_.frequency_mhz();
+        info->output_power_dbm = static_cast<int8_t>(radio_settings_.tx_power_dbm);
+    }
     info->tx_mode = tx_mode_ ? 1 : 0;
     info->tx_in_progress = tx_in_progress_ ? 1 : 0;
     info->has_sent_message = has_sent_message_ ? 1 : 0;

@@ -8,6 +8,7 @@
 
 #include "models/lora_page_model.hpp"
 #include "models/lora_page_contract.hpp"
+#include "models/lora_radio_preferences.hpp"
 #include "lora/cap_lora_1262.hpp"
 #include <lvgl.h>
 
@@ -63,6 +64,7 @@ public:
 
 private:
     enum class ClipboardNotice : uint8_t { None, Copied, Pasted, PastedTruncated, Wait };
+    enum class RadioDialog : uint8_t { None, Notice, Setup };
 
     enum class InfoRowId : uint8_t {
         Nickname,
@@ -94,6 +96,11 @@ private:
     bool scroll_to_latest_pending_ = false;
     bool desktop_help_pressed_     = false;
     cap_lora::LoraInfo lora_info_{};
+    cap_lora::RadioPreferences radio_preferences_;
+    bool radio_notice_acknowledged_ = false;
+    RadioDialog radio_dialog_ = RadioDialog::None;
+    std::size_t radio_field_ = 0;
+    cap_lora::RadioSettings radio_draft_;
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
     std::thread init_thread_;
     std::unique_ptr<cap_lora::CapLoRa1262> lora_device_;
@@ -134,6 +141,17 @@ private:
     lv_obj_t *page_dots_[2]        = {nullptr, nullptr};
     lv_obj_t *active_view_         = nullptr;
     lv_obj_t *root_screen_         = nullptr;
+    lv_obj_t *info_radio_settings_ = nullptr;
+    lv_obj_t *radio_notice_        = nullptr;
+    lv_obj_t *radio_notice_skip_   = nullptr;
+    lv_obj_t *radio_notice_ok_     = nullptr;
+    lv_obj_t *radio_setup_         = nullptr;
+    lv_obj_t *radio_setup_status_  = nullptr;
+    lv_obj_t *radio_setup_save_    = nullptr;
+    lv_obj_t *radio_setup_close_   = nullptr;
+    std::array<lv_obj_t *, 2> radio_rows_{};
+    std::array<lv_obj_t *, 2> radio_values_{};
+    std::array<std::array<lv_obj_t *, 2>, 2> radio_arrows_{};
 
     static void set_visible(lv_obj_t *object, bool visible);
 
@@ -155,6 +173,15 @@ private:
     void create_messages_view();
     void create_info_view();
     void create_send_view();
+    void create_radio_dialogs();
+    void show_radio_setup(bool initial);
+    void update_radio_fields(const char *status = nullptr);
+    void step_radio_field(std::size_t field, bool forward);
+    bool handle_radio_dialog_key(uint32_t key);
+    void accept_radio_notice();
+    void save_radio_settings();
+    void close_radio_setup();
+    static void radio_dialog_click_cb(lv_event_t *event) noexcept;
 
     lv_obj_t *make_action_button(lv_obj_t *parent, lv_coord_t x, lv_coord_t y, lv_coord_t width, const char *text,
                                  lv_color_t background, lv_color_t foreground, lv_event_cb_t callback);

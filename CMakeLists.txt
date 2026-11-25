@@ -250,6 +250,7 @@ set(CAP_LORA_APP_CPP
     "${CAP_LORA_SRC_DIR}/input/gps_keypad.cpp"
     "${CAP_LORA_SRC_DIR}/models/lora_page_model.cpp"
     "${CAP_LORA_SRC_DIR}/models/lora_nickname_store.cpp"
+    "${CAP_LORA_SRC_DIR}/views/lora_radio_dialogs.cpp"
     "${CAP_LORA_SRC_DIR}/views/lora_screen.cpp"
     "${CAP_LORA_SRC_DIR}/views/lora_screen_render.cpp"
     "${CAP_LORA_SRC_DIR}/hal/gps_lvgl_hal.cpp"

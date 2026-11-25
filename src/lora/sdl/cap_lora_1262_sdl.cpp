@@ -10,9 +10,10 @@ namespace cap_lora {
 CapLoRa1262::CapLoRa1262() = default;
 CapLoRa1262::~CapLoRa1262() { shutdown(); }
 
-bool CapLoRa1262::initialize()
+bool CapLoRa1262::initialize(RadioSettings settings)
 {
-    if (stop_requested_.load(std::memory_order_acquire)) return false;
+    if (!settings.complete() || stop_requested_.load(std::memory_order_acquire)) return false;
+    radio_settings_ = settings;
     initialized_ = true;
     tx_in_progress_ = false;
     tx_mode_ = false;
@@ -88,8 +89,8 @@ void CapLoRa1262::shutdown()
     queued_message_.clear();
 }
 
-bool CapLoRa1262::setup() { return initialize(); }
-bool CapLoRa1262::StartServer() { return initialize(); }
+bool CapLoRa1262::setup(RadioSettings settings) { return initialize(settings); }
+bool CapLoRa1262::StartServer(RadioSettings settings) { return initialize(settings); }
 void CapLoRa1262::StopServer() { shutdown(); }
 bool CapLoRa1262::isReady() const { return initialized_; }
 bool CapLoRa1262::exec_send(const char* payload) { return payload != nullptr && send(payload); }
@@ -108,6 +109,10 @@ void CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     std::snprintf(info->pi4io_status, sizeof(info->pi4io_status), "SDL no-op PI4IO");
     info->initialized = initialized_ ? 1 : 0;
     info->hw_ready = initialized_ ? 1 : 0;
+    if (initialized_) {
+        info->frequency_mhz    = radio_settings_.frequency_mhz();
+        info->output_power_dbm = static_cast<int8_t>(radio_settings_.tx_power_dbm);
+    }
     info->tx_mode = tx_mode_ ? 1 : 0;
     info->tx_in_progress = tx_in_progress_ ? 1 : 0;
     info->has_sent_message = has_sent_message_ ? 1 : 0;

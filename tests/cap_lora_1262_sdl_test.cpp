@@ -8,10 +8,20 @@ int main()
 {
     cap_lora::CapLoRa1262 radio;
     cap_lora::LoraInfo info{};
+    const cap_lora::RadioSettings settings{915200, 0};
     CHECK(!radio.exec_send("before init"));
-    CHECK(radio.initialize());
+    CHECK(!radio.initialize({}));
+    CHECK(!radio.initialize({settings.frequency_khz}));
+    CHECK(!radio.initialize({0, settings.tx_power_dbm}));
+    CHECK(!radio.initialize({923001, 22}));
+    CHECK(!radio.initialize({868000, 23}));
+    CHECK(!radio.initialize({915250, 0}));
+    CHECK(!radio.initialize({915200, 12}));
+    CHECK(!radio.exec_send("incomplete configuration"));
+    CHECK(radio.initialize(settings));
     radio.get_info(&info, false);
     CHECK(info.initialized && info.hw_ready);
+    CHECK(info.frequency_mhz == settings.frequency_mhz() && info.output_power_dbm == 0);
     CHECK(std::strcmp(info.spi_device, "sdl://lora") == 0);
     CHECK(std::strcmp(info.probe_display, "LoRa: SDL simulation") == 0);
 
@@ -37,9 +47,21 @@ int main()
     radio.get_info(&info, false);
     CHECK(!info.initialized && !info.hw_ready);
     radio.request_stop();
-    CHECK(!radio.initialize());
+    CHECK(!radio.initialize(settings));
     radio.clear_stop();
-    CHECK(radio.initialize());
+    CHECK(radio.initialize({868100, -9}));
+    CHECK(radio.initialize({922500, 14}));
+    radio.get_info(&info, false);
+    CHECK(info.frequency_mhz == 922.5f && info.output_power_dbm == 14);
     radio.shutdown();
+
+    const auto &frequencies = cap_lora::kRadioFrequenciesKhz;
+    const auto &powers = cap_lora::kRadioPowersDbm;
+    CHECK(cap_lora::step_radio_preset(frequencies, 0, true) == frequencies.front());
+    CHECK(cap_lora::step_radio_preset(frequencies, 0, false) == frequencies.back());
+    CHECK(cap_lora::step_radio_preset(frequencies, frequencies.back(), true) == frequencies.front());
+    CHECK(cap_lora::step_radio_preset(frequencies, frequencies.front(), false) == frequencies.back());
+    CHECK(cap_lora::step_radio_preset(powers, -9, true) == 0);
+    CHECK(cap_lora::step_radio_preset(powers, 0, false) == -9);
     return 0;
 }

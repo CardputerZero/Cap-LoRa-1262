@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 
+#include "lora/lora_radio_settings.hpp"
 #include "pw_result/result.h"
 #include "pw_status/status.h"
 
@@ -43,12 +44,10 @@ void shutdown();
 
 namespace cap_lora {
 inline constexpr std::size_t MAX_TEXT_PAYLOAD = 127;
-inline constexpr float FREQUENCY_MHZ          = 868.0f;
 inline constexpr float BANDWIDTH_KHZ          = 125.0f;
 inline constexpr uint8_t SPREADING_FACTOR     = 12;
 inline constexpr uint8_t CODING_RATE          = 5;
 inline constexpr uint8_t SYNC_WORD            = 0x34;
-inline constexpr int8_t OUTPUT_POWER_DBM      = 22;
 inline constexpr uint16_t PREAMBLE_SYMBOLS    = 20;
 inline constexpr float TCXO_VOLTAGE           = 3.0f;
 inline constexpr float CURRENT_LIMIT_MA       = 140.0f;
@@ -71,7 +70,7 @@ struct LoraInfo {
     char pi4io_status[160] = {};
     float rssi = 0.0f;
     float snr = 0.0f;
-    float frequency_mhz = FREQUENCY_MHZ;
+    float frequency_mhz = 0.0f;
     float bandwidth_khz = BANDWIDTH_KHZ;
     float tcxo_voltage = TCXO_VOLTAGE;
     float current_limit_ma = CURRENT_LIMIT_MA;
@@ -82,7 +81,7 @@ struct LoraInfo {
     uint8_t spreading_factor = SPREADING_FACTOR;
     uint8_t coding_rate = CODING_RATE;
     uint8_t sync_word = SYNC_WORD;
-    int8_t output_power_dbm = OUTPUT_POWER_DBM;
+    int8_t output_power_dbm = 0;
 };
 }  // namespace cap_lora
 
@@ -92,7 +91,7 @@ namespace cap_lora {
  CapLoRa1262 lora;
  if(!lora.probe())
     return;
-    if(!lora.initialize())
+    if(!lora.initialize(settings))
     return;
     lora.set_rx_mode();
     while(true)
@@ -126,7 +125,7 @@ public:
 
     bool InitHard();
     bool InitModule();
-    bool initialize();
+    bool initialize(RadioSettings settings);
     bool probe();
     pw::Result<std::string> poll();
     bool send(const std::string& payload);
@@ -137,8 +136,8 @@ public:
     void request_stop() noexcept;
     void clear_stop() noexcept;
     void shutdown();
-    bool setup();
-    bool StartServer();
+    bool setup(RadioSettings settings);
+    bool StartServer(RadioSettings settings);
     void StopServer();
     void get_info(LoraInfo* info, bool drain_events = false) const;
     bool isReady() const;
@@ -156,6 +155,7 @@ private:
     std::shared_ptr<MyRadioHal> RadioHal_;
     std::shared_ptr<Module> MyModule_;
     std::shared_ptr<SX1262> sx1262_;
+    RadioSettings radio_settings_;
     bool initialized_ = false;
     std::atomic<bool> stop_requested_{false};
     bool tx_in_progress_ = false;
