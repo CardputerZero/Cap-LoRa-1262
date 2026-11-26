@@ -62,8 +62,8 @@ static const char *short_pi4io_status(const char *status)
 {
     status = safe_text(status, "Unavailable");
     if (std::strstr(status, "write OUT failed")) return "OUT write fail";
-    if (std::strstr(status, "write POL failed")) return "POL write fail";
-    if (std::strstr(status, "write CFG failed")) return "CFG write fail";
+    if (std::strstr(status, "write DIR failed")) return "DIR write fail";
+    if (std::strstr(status, "write HIZ failed")) return "HIZ write fail";
     if (std::strstr(status, "snapshot failed")) return "Snapshot fail";
     if (std::strstr(status, "not found")) return "0x43 not found";
     if (std::strstr(status, "open ") && std::strstr(status, "failed")) return "I2C open fail";
@@ -219,7 +219,7 @@ void LoraScreen::update_info_content()
     set_row(InfoRowId::Frequency, region ? value : "--");
     if (region) std::snprintf(value, sizeof(value), "%d dBm", region->tx_power_dbm());
     set_row(InfoRowId::Power, region ? value : "--");
-    if (region) std::snprintf(value, sizeof(value), "%d%%", region->duty_percent);
+    if (region) std::snprintf(value, sizeof(value), "%g%%", region->duty_permille / 10.0);
     set_row(InfoRowId::DutyCycle, region ? value : "--");
     std::snprintf(value, sizeof(value), "v%s", CAP_LORA_APP_VERSION);
     set_row(InfoRowId::Version, value);

@@ -74,15 +74,18 @@ Space to toggle **Don't show again** before accepting. Select a radio region
 to enable LoRa. If you skip setup, the app opens with the radio off.
 Open Info and press `S` to return to the region picker. After upgrading from a
 version with individual frequency and power settings, select your region again.
+The updated notice appears once on upgrade before it can be dismissed again.
 
 Use `Z`/`C` or Left/Right to cycle through regions. The picker shows the
 frequency, conducted TX power, duty cycle, and bandwidth before you save.
 Press Enter to save or Esc to skip or cancel. Other Cap Chat devices must use
 the same region to communicate.
 
-The presets follow the region table and include bands that can fit a full
-channel in the Cap's 868–923 MHz hardware range. Each carrier is centered in
-the overlap and power is capped at the Cap's 22 dBm maximum. The app tracks
+The picker lists the Meshtastic region table through `NP_865` in table order.
+Regions that cannot fit a full channel in the Cap's 868–923 MHz hardware
+range show the table's frequency range, power limit, and duty cycle with Save
+disabled. For supported regions, the carrier is centered in the overlap and
+power is capped at the Cap's 22 dBm maximum. The app tracks
 transmit airtime over a rolling hour while it is running. Choose the region
 for your location and follow the applicable rules for point-to-point
 operation. [Meshtastic region table](https://meshtastic.org/docs/configuration/radio/lora/#region) · [Cap specifications](https://docs.m5stack.com/en/cap/Cap_LoRa-1262)

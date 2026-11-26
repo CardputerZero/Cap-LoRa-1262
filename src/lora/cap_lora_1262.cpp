@@ -165,31 +165,8 @@ public:
 bool cap_lora::CapLoRa1262::InitHard()
 {
     if (!cp0_lora_ext_power_controller::enable()) return false;
-    // Let the controller snapshot and restore the expander registers. Direct
-    // writes here would leave P0 configured after the application exits.
-    if (!cp0_lora_pi4io_controller::scan_and_initialize()) {
-        std::fprintf(stderr, "[cap_lora] PI4IO scan unavailable; continue with direct SX1262 GPIO/SPI\n");
-    }
-    if (!cp0_lora_hat_power_controller::enable(5)) {
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
-        return false;
-    }
-    auto i2c = pw::i2c::LinuxInitiator::OpenI2cBus("/dev/i2c-1");
-    if (!i2c.ok()) {
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_hat_power_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
-        return false;
-    }
-    I2cInitiator_ = std::make_shared<pw::i2c::LinuxInitiator>(std::move(*i2c));
-
-    pi4ioe5v6408_ = std::make_shared<m5::PI4IOE5V6408_Class>(I2cInitiator_);
-    if (!pi4ioe5v6408_) {
-        I2cInitiator_.reset();
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_hat_power_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
+    if (!cp0_lora_hat_power_controller::enable(5) || !cp0_lora_pi4io_controller::scan_and_initialize()) {
+        shutdown();
         return false;
     }
     char candidates[8][64] = {};
@@ -204,34 +181,20 @@ bool cap_lora::CapLoRa1262::InitHard()
         }
     }
     if (spi_fd < 0) {
-        pi4ioe5v6408_.reset();
-        I2cInitiator_.reset();
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_hat_power_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
+        shutdown();
         return false;
     }
     spi_initiator_ = std::make_shared<pw::spi::LinuxInitiator>(spi_fd, cap_lora::SPI_SPEED_HZ);
     const pw::spi::Config config{pw::spi::ClockPolarity::kActiveHigh, pw::spi::ClockPhase::kRisingEdge,
                                  pw::spi::BitsPerWord(8), pw::spi::BitOrder::kMsbFirst};
     if (!spi_initiator_->Configure(config).ok()) {
-        spi_initiator_.reset();
-        I2cInitiator_.reset();
-        pi4ioe5v6408_.reset();
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_hat_power_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
+        shutdown();
         return false;
     }
 
     auto gpio = pw::digital_io::LinuxDigitalIoChip::Open("/dev/gpiochip0");
     if (!gpio.ok()) {
-        spi_initiator_.reset();
-        I2cInitiator_.reset();
-        pi4ioe5v6408_.reset();
-        cp0_lora_pi4io_controller::shutdown();
-        cp0_lora_hat_power_controller::shutdown();
-        cp0_lora_ext_power_controller::restore();
+        shutdown();
         return false;
     }
     gpio_chip_ = std::make_shared<pw::digital_io::LinuxDigitalIoChip>(std::move(*gpio));
@@ -249,9 +212,11 @@ bool cap_lora::CapLoRa1262::InitModule()
 
 bool cap_lora::CapLoRa1262::probe()
 {
-    if (!I2cInitiator_ && !InitHard()) return false;
+    if (!spi_initiator_ && !InitHard()) return false;
     if (!MyModule_ && !InitModule()) return false;
-    return pi4ioe5v6408_ && RadioHal_->probe();
+    if (RadioHal_->probe()) return true;
+    shutdown();
+    return false;
 }
 cap_lora::CapLoRa1262::CapLoRa1262() = default;
 cap_lora::CapLoRa1262::~CapLoRa1262() { shutdown(); }
@@ -365,10 +330,10 @@ pw::Result<bool> cap_lora::CapLoRa1262::msg_send(const std::string& payload)
     if (payload.empty() || payload.size() > kMaxTextPayload) return pw::Status::InvalidArgument();
     if (!initialized_) return pw::Status::Unavailable();
     if (!sx1262_ || tx_in_progress_) return pw::Status::FailedPrecondition();
-    const auto duty_percent = radio_settings_.preset()->duty_percent;
-    if (duty_percent < 100 &&
+    const auto duty_permille = radio_settings_.preset()->duty_permille;
+    if (duty_permille < 1000 &&
         !duty_cycle_.reserve(LoraDutyCycle::Clock::now(), LoraDutyCycle::Airtime{sx1262_->getTimeOnAir(payload.size())},
-                             duty_percent)) {
+                             duty_permille)) {
         return pw::Status::ResourceExhausted();
     }
     if (sx1262_->standby() != RADIOLIB_ERR_NONE) return pw::Status::Internal();
@@ -422,11 +387,9 @@ void cap_lora::CapLoRa1262::shutdown()
     cp0_lora_hat_power_controller::shutdown();
     cp0_lora_ext_power_controller::restore();
     cp0_lora_backend::gpio_release_all();
-    pi4ioe5v6408_.reset();
     RadioHal_.reset();
     spi_initiator_.reset();
     gpio_chip_.reset();
-    I2cInitiator_.reset();
 }
 
 bool cap_lora::CapLoRa1262::setup(RadioSettings settings) { return initialize(settings); }
@@ -972,6 +935,7 @@ void restore() noexcept
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unistd.h>
 
 #include "pw_i2c/initiator.h"
@@ -979,7 +943,7 @@ void restore() noexcept
 #include "pw_result/result.h"
 #include "pw_status/status.h"
 
-#include "driver/PI4IO/PI4IOE5V6408_Class.hpp"
+#include "lora/cp0_lora_pi4io_registers.hpp"
 
 namespace cp0_lora_pi4io_controller {
 namespace {
@@ -991,20 +955,10 @@ constexpr uint8_t I2C_ADDRESS   = 0x43;
 constexpr auto OPERATION_BUDGET = std::chrono::milliseconds(1200);
 
 char status_text[160]  = "I2C 0x43 not checked";
-uint8_t output_cache   = 0x00;
-uint8_t config_cache   = 0xFF;
-uint8_t polarity_cache = 0x00;
 std::mutex controller_mutex;
 std::atomic<bool> stop_requested{false};
-
-struct RegisterSnapshot {
-    bool valid       = false;
-    uint8_t output   = 0;
-    uint8_t config   = 0;
-    uint8_t polarity = 0;
-};
-
-RegisterSnapshot saved_registers;
+std::optional<AntennaSnapshot> saved_registers;
+bool antenna_active = false;
 
 using Deadline = std::chrono::steady_clock::time_point;
 
@@ -1050,82 +1004,38 @@ bool probe(m5::PI4IOE5V6408_Class& pi4io)
     return true;
 }
 
-bool restore_registers(m5::PI4IOE5V6408_Class& pi4io, const RegisterSnapshot& snapshot)
+bool restore(m5::PI4IOE5V6408_Class& pi4io)
 {
-    if (!snapshot.valid) return true;
-    bool ok = true;
-    const struct {
-        uint8_t reg;
-        uint8_t saved;
-    } registers[] = {
-        {0x01, snapshot.output},
-        {0x02, snapshot.polarity},
-        {0x03, snapshot.config},
-    };
-    for (const auto& item : registers) {
-        const pw::Result<uint8_t> current = pi4io.readRegister8(item.reg);
-        if (!current.ok()) {
-            ok = false;
-            continue;
-        }
-        // This controller owns only P0 in each register; leave the bits
-        // other I2C clients may have changed while the app was running
-        // untouched.
-        const uint8_t restored = static_cast<uint8_t>((*current & ~uint8_t{0x01}) | (item.saved & uint8_t{0x01}));
-        if (!pi4io.writeRegister8(item.reg, restored)) ok = false;
-    }
-    return ok;
+    if (!saved_registers) return true;
+    if (!restore_antenna(pi4io, *saved_registers)) return false;
+    saved_registers.reset();
+    return true;
 }
 
 bool initialize(m5::PI4IOE5V6408_Class& pi4io, const Deadline& deadline)
 {
-    RegisterSnapshot original;
-    original.valid                     = true;
-    const pw::Result<uint8_t> output   = pi4io.readRegister8(0x01);
-    const pw::Result<uint8_t> polarity = pi4io.readRegister8(0x02);
-    const pw::Result<uint8_t> config   = pi4io.readRegister8(0x03);
-    if (should_stop(deadline) || !output.ok() || !polarity.ok() || !config.ok()) {
-        const int code = !output.ok()     ? static_cast<int>(output.status().code())
-                         : !polarity.ok() ? static_cast<int>(polarity.status().code())
-                                          : static_cast<int>(config.status().code());
-        snprintf(status_text, sizeof(status_text), "I2C IO snapshot failed at 0x%02X status=%d", I2C_ADDRESS, code);
+    const auto original = read_antenna_snapshot(pi4io);
+    if (!original.ok()) {
+        snprintf(status_text, sizeof(status_text), "I2C IO snapshot failed at 0x%02X status=%d", I2C_ADDRESS,
+                 static_cast<int>(original.status().code()));
         return false;
     }
-    original.output   = *output;
-    original.polarity = *polarity;
-    original.config   = *config;
 
-    polarity_cache = static_cast<uint8_t>(original.polarity & ~uint8_t{0x01});
-    output_cache   = static_cast<uint8_t>(original.output | uint8_t{0x01});
-    config_cache   = static_cast<uint8_t>(original.config & ~uint8_t{0x01});
-    struct RegisterWrite {
-        uint8_t reg;
-        uint8_t value;
-        const char* name;
-    };
-    const RegisterWrite writes[] = {
-        {0x02, polarity_cache, "POL"},
-        {0x01, output_cache, "OUT"},
-        {0x03, config_cache, "CFG"},
-    };
-    for (const auto& item : writes) {
-        if (should_stop(deadline)) {
+    saved_registers = *original;
+    const char* failed_register = "";
+    const auto status = enable_antenna(pi4io, *original, [&] { return should_stop(deadline); }, failed_register);
+    if (!status.ok()) {
+        if (status.IsCancelled())
             snprintf(status_text, sizeof(status_text), "I2C IO init cancelled");
-            (void)restore_registers(pi4io, original);
-            return false;
-        }
-        if (!pi4io.writeRegister8(item.reg, item.value)) {
-            snprintf(status_text, sizeof(status_text), "I2C IO write %s failed at 0x%02X status=%d", item.name,
-                     I2C_ADDRESS, static_cast<int>(pi4io.lastStatus().code()));
-            (void)restore_registers(pi4io, original);
-            return false;
-        }
+        else
+            snprintf(status_text, sizeof(status_text), "I2C IO write %s failed at 0x%02X status=%d",
+                     failed_register, I2C_ADDRESS, static_cast<int>(status.code()));
+        (void)restore(pi4io);
+        return false;
     }
 
-    saved_registers = original;
-
-    snprintf(status_text, sizeof(status_text), "I2C IO init ok OUT=0x%02X POL=0x%02X CFG=0x%02X P0=HIGH", output_cache,
-             polarity_cache, config_cache);
+    antenna_active = true;
+    snprintf(status_text, sizeof(status_text), "I2C IO init ok P0=HIGH");
     return true;
 }
 
@@ -1134,7 +1044,7 @@ bool initialize(m5::PI4IOE5V6408_Class& pi4io, const Deadline& deadline)
 bool scan_and_initialize()
 {
     std::lock_guard<std::mutex> lock(controller_mutex);
-    if (saved_registers.valid) return true;
+    if (antenna_active) return true;
     const Deadline deadline = std::chrono::steady_clock::now() + OPERATION_BUDGET;
     if (should_stop(deadline)) {
         snprintf(status_text, sizeof(status_text), "I2C IO init cancelled");
@@ -1142,11 +1052,13 @@ bool scan_and_initialize()
     }
     InitiatorPtr initiator = open_bus_factory("/dev/i2c-1");
     if (!initiator) return false;
-    // The initiator (and the exclusive bus lock it owns) is released when
-    // this scope ends, after the last register transfer.
     m5::PI4IOE5V6408_Class pi4io(*initiator, I2C_ADDRESS);
-    const bool ok = !should_stop(deadline) && probe(pi4io) && !should_stop(deadline) && initialize(pi4io, deadline);
-    return ok;
+    if (should_stop(deadline) || !probe(pi4io)) return false;
+    if (!restore(pi4io)) {
+        snprintf(status_text, sizeof(status_text), "I2C IO restore failed at 0x%02X", I2C_ADDRESS);
+        return false;
+    }
+    return initialize(pi4io, deadline);
 }
 
 void request_stop() noexcept
@@ -1162,13 +1074,12 @@ void clear_stop() noexcept
 void shutdown()
 {
     std::lock_guard<std::mutex> lock(controller_mutex);
-    if (!saved_registers.valid) return;
+    antenna_active = false;
+    if (!saved_registers) return;
     InitiatorPtr initiator = open_bus_factory("/dev/i2c-1");
     if (!initiator) return;
     m5::PI4IOE5V6408_Class pi4io(*initiator, I2C_ADDRESS);
-    const bool ok = restore_registers(pi4io, saved_registers);
-    if (ok) {
-        saved_registers = {};
+    if (restore(pi4io)) {
         snprintf(status_text, sizeof(status_text), "I2C IO state restored");
     } else {
         snprintf(status_text, sizeof(status_text), "I2C IO restore failed at 0x%02X", I2C_ADDRESS);

@@ -72,7 +72,7 @@ pw::Result<bool> CapLoRa1262::msg_send(const std::string& payload)
     if (tx_in_progress_) return pw::Status::FailedPrecondition();
     const auto& region = *radio_settings_.preset();
     if (!duty_cycle_.reserve(LoraDutyCycle::Clock::now(), simulated_airtime(payload.size(), region.bandwidth_hz),
-                             region.duty_percent)) {
+                             region.duty_permille)) {
         return pw::Status::ResourceExhausted();
     }
     tx_mode_ = false;

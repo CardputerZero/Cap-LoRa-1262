@@ -21,6 +21,7 @@ namespace {
 constexpr char kConfigDirectoryName[] = "Cap-LoRa-1262";
 constexpr char kNicknameFileName[]     = "nickname";
 constexpr char kRadioFileName[]        = "radio";
+constexpr std::string_view kSkipRadioNotice = "skip-notice-v2";
 
 struct UserConfigLocation {
     std::filesystem::path directory;
@@ -180,11 +181,12 @@ RadioPreferences load_radio_preferences()
     std::ifstream input(radio_config_location().directory / kRadioFileName);
     std::string line;
     if (!std::getline(input, line) ||
-        (line != "skip-notice" && line != "show-notice" && line != "notice-accepted")) return {};
+        (line != kSkipRadioNotice && line != "skip-notice" && line != "show-notice" && line != "notice-accepted"))
+        return {};
 
     RadioPreferences preferences;
-    // Older files recorded Continue even without an explicit opt-out.
-    preferences.skip_notice = line == "skip-notice";
+    // Ask once again after upgrading from the notice with Continue as its default.
+    preferences.skip_notice = line == kSkipRadioNotice;
     // Legacy frequency/power pairs cannot establish a region or its duty limit.
     if (std::getline(input, line) && line.compare(0, 7, "region=") == 0) {
         preferences.settings = radio_settings_for_code(std::string_view(line).substr(7));
@@ -194,7 +196,8 @@ RadioPreferences load_radio_preferences()
 
 bool save_radio_preferences(const RadioPreferences& preferences, std::string& error)
 {
-    std::string contents = preferences.skip_notice ? "skip-notice\n" : "show-notice\n";
+    std::string contents(preferences.skip_notice ? kSkipRadioNotice : "show-notice");
+    contents += '\n';
     if (const auto* region = preferences.settings.preset()) {
         contents += "region=";
         contents += region->code;

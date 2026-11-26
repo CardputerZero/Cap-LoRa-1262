@@ -20,10 +20,8 @@
 
 #include "RadioLib.h"
 #include "pw_spi_linux/spi.h"
-#include "pw_i2c_linux/initiator.h"
 #include "pw_digital_io/polarity.h"
 #include "pw_digital_io_linux/digital_io.h"
-#include "driver/PI4IO/PI4IOE5V6408_Class.hpp"
 #if defined(CAP_LORA_USE_RADIOLIB_PIHAL) && CAP_LORA_USE_RADIOLIB_PIHAL && \
     __has_include("hal/RPi/PiHal.h") && __has_include(<lgpio.h>)
 #include "hal/RPi/PiHal.h"
@@ -150,8 +148,6 @@ private:
     static constexpr std::size_t kMaxTextPayload = MAX_TEXT_PAYLOAD;
     std::shared_ptr<pw::spi::LinuxInitiator> spi_initiator_;
     std::shared_ptr<pw::digital_io::LinuxDigitalIoChip> gpio_chip_;
-    std::shared_ptr<pw::i2c::LinuxInitiator> I2cInitiator_;
-    std::shared_ptr<m5::PI4IOE5V6408_Class> pi4ioe5v6408_;
     std::shared_ptr<MyRadioHal> RadioHal_;
     std::shared_ptr<Module> MyModule_;
     std::shared_ptr<SX1262> sx1262_;

@@ -16,8 +16,9 @@ struct RadioRegion {
     int lower_khz;
     int upper_khz;
     int table_power_dbm;
-    int duty_percent;
-    int bandwidth_hz = kChatBandwidthHz;
+    int duty_permille;
+    int bandwidth_hz         = kChatBandwidthHz;
+    int router_duty_permille = 0;
 
     constexpr int usable_lower_khz() const
     {
@@ -51,44 +52,52 @@ struct RadioRegion {
     }
 };
 
-// Meshtastic LoRa Region table, in table order, limited to bands that can
-// fit a complete signal in the Cap's specified RF range.
+// Meshtastic LoRa Region table through NP_865, in table order. Duty is
+// stored in tenths of a percent to also represent EU_866's 2.5% limit.
 inline constexpr std::array kRadioRegions{
-    RadioRegion{"US", 902000, 928000, 30, 100},
-    RadioRegion{"EU_868", 869400, 869650, 27, 10},
-    RadioRegion{"EU_N_868", 869400, 869650, 27, 10, 62500},
-    RadioRegion{"JP", 920500, 923500, 13, 100},
-    RadioRegion{"ANZ", 915000, 928000, 30, 100},
-    RadioRegion{"KR", 920000, 923000, 23, 100},
-    RadioRegion{"TW", 920000, 925000, 27, 100},
-    RadioRegion{"RU", 868700, 869200, 20, 100},
-    RadioRegion{"TH", 920000, 925000, 27, 10},
-    RadioRegion{"MY_919", 919000, 924000, 27, 100},
-    RadioRegion{"SG_923", 917000, 925000, 20, 100},
-    RadioRegion{"BR_902", 902000, 907500, 30, 100},
-    RadioRegion{"PH_868", 868000, 869400, 14, 100},
-    RadioRegion{"PH_915", 915000, 918000, 24, 100},
+    RadioRegion{"US", 902000, 928000, 30, 1000},
+    RadioRegion{"EU_433", 433000, 434000, 10, 100},
+    RadioRegion{"EU_868", 869400, 869650, 27, 100},
+    RadioRegion{"EU_866", 865600, 867600, 27, 25, 125000, 100},
+    RadioRegion{"EU_N_868", 869400, 869650, 27, 100, 62500},
+    RadioRegion{"CN", 470000, 510000, 19, 1000},
+    RadioRegion{"JP", 920500, 923500, 13, 1000},
+    RadioRegion{"ANZ", 915000, 928000, 30, 1000},
+    RadioRegion{"ANZ_433", 433050, 434790, 14, 1000},
+    RadioRegion{"KR", 920000, 923000, 23, 1000},
+    RadioRegion{"TW", 920000, 925000, 27, 1000},
+    RadioRegion{"RU", 868700, 869200, 20, 1000},
+    RadioRegion{"IN", 865000, 867000, 30, 1000},
+    RadioRegion{"NZ_865", 864000, 868000, 36, 1000},
+    RadioRegion{"TH", 920000, 925000, 27, 100},
+    RadioRegion{"UA_433", 433000, 434700, 10, 100},
+    RadioRegion{"MY_433", 433000, 435000, 20, 1000},
+    RadioRegion{"MY_919", 919000, 924000, 27, 1000},
+    RadioRegion{"SG_923", 917000, 925000, 20, 1000},
+    RadioRegion{"KZ_433", 433075, 434775, 10, 1000},
+    RadioRegion{"KZ_863", 863000, 868000, 30, 1000},
+    RadioRegion{"BR_902", 902000, 907500, 30, 1000},
+    RadioRegion{"PH_433", 433000, 434700, 10, 1000},
+    RadioRegion{"PH_868", 868000, 869400, 14, 1000},
+    RadioRegion{"PH_915", 915000, 918000, 24, 1000},
+    RadioRegion{"NP_865", 865000, 868000, 30, 1000},
 };
-
-static_assert(
-    [] {
-        for (const auto& region : kRadioRegions) {
-            if (!region.fits_cap()) return false;
-        }
-        return true;
-    }(),
-    "Every preset must fit inside both the Cap and the regional band");
 
 struct RadioSettings {
     std::size_t region = 0;
 
-    constexpr bool complete() const
+    constexpr const RadioRegion* entry() const
     {
-        return region > 0 && region <= kRadioRegions.size();
+        return region > 0 && region <= kRadioRegions.size() ? &kRadioRegions[region - 1] : nullptr;
     }
     constexpr const RadioRegion* preset() const
     {
-        return complete() ? &kRadioRegions[region - 1] : nullptr;
+        const auto* choice = entry();
+        return choice && choice->fits_cap() ? choice : nullptr;
+    }
+    constexpr bool complete() const
+    {
+        return preset() != nullptr;
     }
 };
 
@@ -103,7 +112,7 @@ constexpr RadioSettings radio_settings_for_code(std::string_view code)
 constexpr RadioSettings step_radio_region(RadioSettings settings, bool forward)
 {
     const auto size = kRadioRegions.size();
-    if (!settings.complete()) return {forward ? 1 : size};
+    if (!settings.entry()) return {forward ? 1 : size};
     const auto step = forward ? 1 : size - 1;
     return {(settings.region - 1 + step) % size + 1};
 }

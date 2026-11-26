@@ -91,7 +91,7 @@ void LoraScreen::create_radio_dialogs()
                 }
             }
         }
-        constexpr const char *captions[] = {"Frequency", "TX power", "Duty cycle"};
+        constexpr const char *captions[] = {"Frequency (MHz)", "TX power", "Duty cycle"};
         constexpr int positions[]        = {16, 123, 212};
         constexpr int widths[]           = {105, 86, 64};
         for (std::size_t i = 0; i < radio_values_.size(); ++i) {
@@ -120,23 +120,40 @@ void LoraScreen::show_radio_setup(bool initial)
 
 void LoraScreen::update_radio_region(const char *status)
 {
-    const auto *region = radio_draft_.preset();
+    const auto *region     = radio_draft_.entry();
+    const bool unsupported = region && !region->fits_cap();
     lv_label_set_text(radio_region_label_, region ? region->code.data() : "Unset");
     const char *values[] = {"--", "--", "--"};
     char frequency[24], power[16], duty[12], bandwidth[16];
     if (region) {
-        std::snprintf(frequency, sizeof(frequency), "%.3f MHz", region->frequency_mhz());
-        std::snprintf(power, sizeof(power), "%d dBm", region->tx_power_dbm());
-        std::snprintf(duty, sizeof(duty), "%d%%", region->duty_percent);
+        if (unsupported)
+            std::snprintf(frequency, sizeof(frequency), "%g-%g", region->lower_khz / 1000.0,
+                          region->upper_khz / 1000.0);
+        else
+            std::snprintf(frequency, sizeof(frequency), "%.3f", region->frequency_mhz());
+        std::snprintf(power, sizeof(power), "%d dBm", unsupported ? region->table_power_dbm : region->tx_power_dbm());
+        if (region->router_duty_permille != 0)
+            std::snprintf(duty, sizeof(duty), "%g/%g%%", region->duty_permille / 10.0,
+                          region->router_duty_permille / 10.0);
+        else
+            std::snprintf(duty, sizeof(duty), "%g%%", region->duty_permille / 10.0);
         std::snprintf(bandwidth, sizeof(bandwidth), "%g kHz", region->bandwidth_khz());
         values[0] = frequency;
         values[1] = power;
         values[2] = duty;
     }
+    lv_obj_set_style_text_font(radio_values_[0], unsupported ? &lv_font_montserrat_10 : &lv_font_montserrat_14,
+                               LV_PART_MAIN);
     for (std::size_t i = 0; i < radio_values_.size(); ++i) lv_label_set_text(radio_values_[i], values[i]);
-    lv_label_set_text(radio_bandwidth_label_, region ? bandwidth : "");
-    lv_obj_set_style_text_color(radio_setup_status_, lv_color_hex(status ? kError : kSecondary), LV_PART_MAIN);
-    lv_label_set_text(radio_setup_status_, status ? status : "Z / C: Change region");
+    lv_label_set_text(radio_bandwidth_label_, region && !unsupported ? bandwidth : "");
+    lv_obj_set_style_text_color(radio_setup_status_, lv_color_hex(status || unsupported ? kError : kSecondary),
+                                LV_PART_MAIN);
+    lv_label_set_text(radio_setup_status_, unsupported ? "No channel in Cap's 868-923 MHz band"
+                                                       : (status ? status : "Z / C: Change region"));
+    lv_obj_set_state(radio_setup_save_, LV_STATE_DISABLED, unsupported);
+    lv_obj_set_style_bg_color(radio_setup_save_, lv_color_hex(unsupported ? 0x292929 : kAccent), LV_PART_MAIN);
+    if (auto *label = lv_obj_get_child(radio_setup_save_, 0))
+        lv_obj_set_style_text_color(label, lv_color_hex(unsupported ? kSecondary : 0x141414), LV_PART_MAIN);
 }
 
 void LoraScreen::step_radio_region(bool forward)

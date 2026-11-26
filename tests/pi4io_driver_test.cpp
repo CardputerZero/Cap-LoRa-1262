@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <vector>
 
 #include "pw_chrono/system_clock.h"
@@ -18,6 +19,7 @@
 #include "pw_status/status.h"
 
 #include "driver/PI4IO/PI4IOE5V6408_Class.hpp"
+#include "lora/cp0_lora_pi4io_registers.hpp"
 
 namespace {
 
@@ -51,6 +53,7 @@ public:
         for (const std::byte byte : tx_buffer)
             transaction.bytes.push_back(std::to_integer<uint8_t>(byte));
         if (transaction.is_write && tx_buffer.size() == 2) {
+            if (rejected_write == transaction.bytes[0]) return pw::Status::Unavailable();
             registers[transaction.bytes[0]] = transaction.bytes[1];
         } else if (!transaction.is_write) {
             // Register read: serve the value and record it.
@@ -65,6 +68,7 @@ public:
     std::vector<Transaction> transactions;
     uint8_t registers[256] = {};
     bool fail_next = false;
+    std::optional<uint8_t> rejected_write;
 };
 
 Transaction write_of(uint8_t reg, uint8_t value)
@@ -82,6 +86,39 @@ Transaction read_of(uint8_t reg, uint8_t value)
 int main()
 {
     using m5::PI4IOE5V6408_Class;
+
+    {
+        using namespace cp0_lora_pi4io_controller;
+        RecordingInitiator bus;
+        PI4IOE5V6408_Class pi4io(bus);
+        bus.registers[0x05] = 0xA0;
+        bus.registers[0x03] = 0x10;
+        bus.registers[0x07] = 0xFF;
+        const auto snapshot = read_antenna_snapshot(pi4io);
+        CHECK(snapshot.ok());
+        CHECK((bus.transactions == std::vector{read_of(0x05, 0xA0), read_of(0x03, 0x10), read_of(0x07, 0xFF)}));
+        bus.transactions.clear();
+        const char* failed_register = nullptr;
+        CHECK(enable_antenna(pi4io, *snapshot, [] { return false; }, failed_register).ok());
+        CHECK((bus.transactions == std::vector{write_of(0x05, 0xA1), write_of(0x03, 0x11), write_of(0x07, 0xFE)}));
+
+        bus.registers[0x05] = 0xC1;
+        bus.registers[0x03] = 0x31;
+        bus.registers[0x07] = 0xFC;
+        bus.transactions.clear();
+        CHECK(restore_antenna(pi4io, *snapshot));
+        CHECK((bus.transactions == std::vector{read_of(0x07, 0xFC), write_of(0x07, 0xFD), read_of(0x03, 0x31),
+                                               write_of(0x03, 0x30), read_of(0x05, 0xC1), write_of(0x05, 0xC0)}));
+
+        const auto before_retry = read_antenna_snapshot(pi4io);
+        CHECK(before_retry.ok());
+        bus.rejected_write = 0x03;
+        CHECK(enable_antenna(pi4io, *before_retry, [] { return false; }, failed_register).IsUnavailable());
+        CHECK(std::strcmp(failed_register, "DIR") == 0);
+        CHECK(bus.registers[0x07] == 0xFD);
+        CHECK(restore_antenna(pi4io, *before_retry));
+        CHECK(bus.registers[0x05] == 0xC0);
+    }
 
     {
         // Register writes are one atomic write transaction [reg, value].

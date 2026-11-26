@@ -11,13 +11,13 @@ public:
     using Airtime = std::chrono::microseconds;
     using Minute  = std::chrono::minutes;
 
-    bool reserve(Clock::time_point now, Airtime airtime, int duty_percent)
+    bool reserve(Clock::time_point now, Airtime airtime, int duty_permille)
     {
-        if (duty_percent == 100) return true;
-        if (duty_percent <= 0 || duty_percent > 100 || airtime <= Airtime::zero() || airtime >= Minute{1}) return false;
+        if (duty_permille == 1000) return true;
+        if (duty_permille <= 0 || duty_permille > 1000 || airtime <= Airtime::zero() || airtime >= Minute{1}) return false;
 
         constexpr auto hour = std::chrono::duration_cast<Airtime>(std::chrono::hours{1});
-        const auto budget   = hour * duty_percent / 100;
+        const auto budget   = hour * duty_permille / 1000;
         const auto minute   = std::chrono::floor<Minute>(now.time_since_epoch());
 
         Airtime used{};
