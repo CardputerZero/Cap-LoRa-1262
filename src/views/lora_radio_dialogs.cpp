@@ -13,7 +13,8 @@ constexpr uint32_t kError     = 0xFF9B91;
 
 void LoraScreen::create_radio_dialogs()
 {
-    radio_notice_ok_ = radio_notice_skip_ = radio_setup_status_ = radio_setup_close_ = radio_setup_save_ = nullptr;
+    radio_notice_decline_ = radio_notice_accept_ = radio_notice_skip_ = nullptr;
+    radio_setup_status_ = radio_setup_close_ = radio_setup_save_ = nullptr;
     radio_region_label_ = radio_bandwidth_label_ = nullptr;
     radio_values_.fill(nullptr);
     radio_arrows_.fill(nullptr);
@@ -64,8 +65,12 @@ void LoraScreen::create_radio_dialogs()
             lv_obj_set_style_text_color(checkbox, lv_color_black(), checked);
         }
         label(panel, "7 / Space", 202, 94, 74, 16, &lv_font_montserrat_12, kSecondary);
-        label(panel, "Esc: Exit", 16, 117, 132, 19, &lv_font_montserrat_12, kSecondary);
-        radio_notice_ok_ = primary_button(panel, "Enter: Continue");
+        radio_notice_decline_ = make_action_button(panel, 16, 109, 125, "Decline", lv_color_hex(0x292929),
+                                                   lv_color_hex(kText), radio_dialog_click_cb);
+        radio_notice_accept_  = make_action_button(panel, 151, 109, 125, "Accept", lv_color_hex(0x292929),
+                                                   lv_color_hex(kText), radio_dialog_click_cb);
+        make_label(panel, "Z / C: Choose   Enter: Confirm", 16, 137, 260, 13, &lv_font_montserrat_10,
+                   lv_color_hex(kSecondary), LV_TEXT_ALIGN_CENTER);
     }
 
     if (lv_obj_t *panel = make_overlay(radio_setup_)) {
@@ -148,10 +153,19 @@ bool LoraScreen::handle_radio_dialog_key(uint32_t key)
                 lv_obj_remove_state(radio_notice_skip_, LV_STATE_CHECKED);
             else
                 lv_obj_add_state(radio_notice_skip_, LV_STATE_CHECKED);
+        } else if (key == LV_KEY_LEFT || key == LV_KEY_PREV || key == 'z' || key == 'Z') {
+            select_radio_notice_action(false);
+        } else if (key == LV_KEY_RIGHT || key == LV_KEY_NEXT || key == 'c' || key == 'C') {
+            select_radio_notice_action(true);
         } else if (key == LV_KEY_ENTER || key == '8') {
-            accept_radio_notice();
+            if (radio_accept_selected_)
+                accept_radio_notice();
+            else
+                exit_requested_ = true;
+        } else if (key == LV_KEY_ESC) {
+            exit_requested_ = true;
         }
-        return key != LV_KEY_ESC;
+        return true;
     }
 
     if (key == LV_KEY_ESC) {
@@ -168,6 +182,18 @@ bool LoraScreen::handle_radio_dialog_key(uint32_t key)
         step_radio_region(true);
     }
     return true;
+}
+
+void LoraScreen::select_radio_notice_action(bool accept)
+{
+    radio_accept_selected_ = accept;
+    const auto style       = [](lv_obj_t *button, bool selected) {
+        lv_obj_set_style_bg_color(button, lv_color_hex(selected ? kAccent : 0x292929), LV_PART_MAIN);
+        if (auto *label = lv_obj_get_child(button, 0))
+            lv_obj_set_style_text_color(label, lv_color_hex(selected ? 0x141414 : kText), LV_PART_MAIN);
+    };
+    style(radio_notice_decline_, !accept);
+    style(radio_notice_accept_, accept);
 }
 
 void LoraScreen::accept_radio_notice()
@@ -228,12 +254,15 @@ void LoraScreen::close_radio_setup()
 void LoraScreen::radio_dialog_click_cb(lv_event_t *event) noexcept
 {
     auto *self = static_cast<LoraScreen *>(lv_event_get_user_data(event));
-    if (!self || !self->app_active_) return;
+    if (!self || !self->app_active_ || self->exit_requested_) return;
     auto *target = lv_event_get_current_target_obj(event);
     try {
         switch (self->radio_dialog_) {
             case RadioDialog::Notice:
-                if (target == self->radio_notice_ok_) self->accept_radio_notice();
+                if (target == self->radio_notice_accept_)
+                    self->accept_radio_notice();
+                else if (target == self->radio_notice_decline_)
+                    self->exit_requested_ = true;
                 break;
             case RadioDialog::Setup:
                 if (target == self->radio_setup_save_)

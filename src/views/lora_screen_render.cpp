@@ -823,7 +823,8 @@ void LoraScreen::track_owned_handle(lv_obj_t *object)
 
 bool LoraScreen::ui_ready() const
 {
-    if (!info_radio_settings_ || !radio_notice_ || !radio_notice_skip_ || !radio_notice_ok_ || !radio_setup_ ||
+    if (!info_radio_settings_ || !radio_notice_ || !radio_notice_skip_ || !radio_notice_decline_ ||
+        !radio_notice_accept_ || !radio_setup_ ||
         !radio_setup_status_ || !radio_setup_save_ || !radio_setup_close_ || !lv_obj_get_child(radio_setup_close_, 0))
         return false;
     if (!radio_region_label_ || !radio_bandwidth_label_ || !radio_arrows_[0] || !radio_arrows_[1]) return false;

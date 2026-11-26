@@ -68,9 +68,10 @@ Run the SDL build with:
 CAP_LORA_SDL_ZOOM=2 ./dist/sdl/Cap-LoRa-1262
 ```
 
-Acknowledge the radio regulations notice on launch. Press `7` or Space to
-toggle **Don't show again**, then press Enter to continue. Select a radio
-region to enable LoRa. If you skip setup, the app opens with the radio off.
+The radio regulations notice defaults to **Decline**, which exits the app.
+Press `C` or Right to select **Accept**, then Enter to confirm. Press `7` or
+Space to toggle **Don't show again** before accepting. Select a radio region
+to enable LoRa. If you skip setup, the app opens with the radio off.
 Open Info and press `S` to return to the region picker. After upgrading from a
 version with individual frequency and power settings, select your region again.
 

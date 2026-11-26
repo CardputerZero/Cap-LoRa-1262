@@ -121,6 +121,7 @@ LoraScreen::~LoraScreen()
 void LoraScreen::onEnter(lv_obj_t *parent)
 {
     onExit();
+    exit_requested_ = false;
     desktop_help_pressed_ = false;
     radio_dialog_         = RadioDialog::None;
     radio_preferences_    = cap_lora::load_radio_preferences();
@@ -182,6 +183,7 @@ void LoraScreen::tick(uint32_t)
 
 bool LoraScreen::handleKey(uint32_t key)
 {
+    if (exit_requested_) return true;
     if (!app_active_) return false;
     if (radio_dialog_ != RadioDialog::None) return handle_radio_dialog_key(key);
     const bool help_visible = help_view_ && !lv_obj_has_flag(help_view_, LV_OBJ_FLAG_HIDDEN);
@@ -256,6 +258,7 @@ void LoraScreen::init_lora()
     poll_timer_ = lv_timer_create(&LoraScreen::static_poll_timer_cb, lora_app_detail::kPollIntervalMs, this);
 
     if (!radio_notice_acknowledged_) {
+        select_radio_notice_action(false);
         radio_dialog_ = RadioDialog::Notice;
         set_visible(radio_notice_, true);
         lv_obj_move_foreground(radio_notice_);

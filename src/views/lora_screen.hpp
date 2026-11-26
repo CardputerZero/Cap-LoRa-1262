@@ -57,6 +57,7 @@ public:
     void onExit();
     void tick(uint32_t now_ms);
     bool handleKey(uint32_t key);
+    bool exitRequested() const noexcept { return exit_requested_; }
     bool active() const noexcept
     {
         return app_active_;
@@ -94,12 +95,14 @@ private:
 
     LoraPageModel model_;
     bool app_active_               = false;
+    bool exit_requested_           = false;
     bool initialization_pending_   = false;
     bool scroll_to_latest_pending_ = false;
     bool desktop_help_pressed_     = false;
     cap_lora::LoraInfo lora_info_{};
     cap_lora::RadioPreferences radio_preferences_;
     bool radio_notice_acknowledged_ = false;
+    bool radio_accept_selected_ = false;
     RadioDialog radio_dialog_ = RadioDialog::None;
     cap_lora::RadioSettings radio_draft_;
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
@@ -145,7 +148,8 @@ private:
     lv_obj_t *info_radio_settings_ = nullptr;
     lv_obj_t *radio_notice_        = nullptr;
     lv_obj_t *radio_notice_skip_   = nullptr;
-    lv_obj_t *radio_notice_ok_     = nullptr;
+    lv_obj_t *radio_notice_decline_ = nullptr;
+    lv_obj_t *radio_notice_accept_ = nullptr;
     lv_obj_t *radio_setup_         = nullptr;
     lv_obj_t *radio_setup_status_  = nullptr;
     lv_obj_t *radio_setup_save_    = nullptr;
@@ -180,6 +184,7 @@ private:
     void update_radio_region(const char *status = nullptr);
     void step_radio_region(bool forward);
     bool handle_radio_dialog_key(uint32_t key);
+    void select_radio_notice_action(bool accept);
     void accept_radio_notice();
     void save_radio_settings();
     void close_radio_setup();

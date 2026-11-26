@@ -19,7 +19,7 @@ public:
     void stop();
     bool onLvglKeyState(uint32_t key, const char* utf8, bool pressed);
     void tick(uint32_t now_ms);
-    bool quitRequested() const { return quit_requested_; }
+    bool quitRequested() const { return quit_requested_ || screen_.exitRequested(); }
 
 private:
     LoraScreen screen_;
