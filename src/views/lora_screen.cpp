@@ -656,7 +656,8 @@ void LoraScreen::send_current_text()
     const std::string reply_to(model_.reply_to());
     const std::string reply_to_sender(model_.reply_to_sender());
     const std::string payload = lora_chat_protocol::encode(sent_text, model_.nickname(), reply_to);
-    if (lora_device_ && !payload.empty() && lora_device_->exec_send(payload.c_str())) {
+    const auto result = lora_device_ ? lora_device_->msg_send(payload) : pw::Result<bool>{pw::Status::Unavailable()};
+    if (result.ok() && *result) {
         pending_tx_text_ = payload;
         clear_message_selection();
         append_chat_message(sent_text.c_str(), true, 0.0f, 0.0f, {}, LoraMessageDelivery::PENDING, reply_to,
@@ -665,7 +666,7 @@ void LoraScreen::send_current_text()
         refresh_lora_info(false);
         render_current_view();
     } else {
-        model_.set_send_status("Send failed");
+        model_.set_send_status(result.status().IsResourceExhausted() ? "Duty limit reached. Try later." : "Send failed");
         update_send_content();
     }
 }

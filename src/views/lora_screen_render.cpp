@@ -213,20 +213,23 @@ void LoraScreen::update_info_content()
         set_row(InfoRowId::Snr, "--");
     }
     set_row(InfoRowId::Radio, "SX1262");
-    const auto &settings = radio_preferences_.settings;
-    if (settings.valid_frequency()) std::snprintf(value, sizeof(value), "%.3f MHz", settings.frequency_mhz());
-    set_row(InfoRowId::Frequency, settings.valid_frequency() ? value : "Unset");
+    const auto *region = radio_preferences_.settings.preset();
+    set_row(InfoRowId::Region, region ? region->code.data() : "Unset");
+    if (region) std::snprintf(value, sizeof(value), "%.3f MHz", region->frequency_mhz());
+    set_row(InfoRowId::Frequency, region ? value : "--");
+    if (region) std::snprintf(value, sizeof(value), "%d dBm", region->tx_power_dbm());
+    set_row(InfoRowId::Power, region ? value : "--");
+    if (region) std::snprintf(value, sizeof(value), "%d%%", region->duty_percent);
+    set_row(InfoRowId::DutyCycle, region ? value : "--");
     std::snprintf(value, sizeof(value), "v%s", CAP_LORA_APP_VERSION);
     set_row(InfoRowId::Version, value);
     set_row(InfoRowId::Modulation, "LoRa");
-    std::snprintf(value, sizeof(value), "%.0f kHz", lora_info_.bandwidth_khz);
-    set_row(InfoRowId::Bandwidth, value);
+    if (region) std::snprintf(value, sizeof(value), "%g kHz", region->bandwidth_khz());
+    set_row(InfoRowId::Bandwidth, region ? value : "--");
     std::snprintf(value, sizeof(value), "SF%u", static_cast<unsigned>(lora_info_.spreading_factor));
     set_row(InfoRowId::SpreadingFactor, value);
     std::snprintf(value, sizeof(value), "4/%u", static_cast<unsigned>(lora_info_.coding_rate));
     set_row(InfoRowId::CodingRate, value);
-    if (settings.valid_power()) std::snprintf(value, sizeof(value), "%d dBm", settings.tx_power_dbm);
-    set_row(InfoRowId::Power, settings.valid_power() ? value : "Unset");
     std::snprintf(value, sizeof(value), "%u symbols", static_cast<unsigned>(lora_info_.preamble_symbols));
     set_row(InfoRowId::Preamble, value);
     std::snprintf(value, sizeof(value), "0x%02X", static_cast<unsigned>(lora_info_.sync_word));
@@ -246,8 +249,8 @@ void LoraScreen::update_info_content()
     set_row(InfoRowId::SpiDevice, value);
     set_row(InfoRowId::Pi4io, lora_app_detail::short_pi4io_status(lora_info_.pi4io_status));
 
-    if (!settings.complete()) {
-        lv_label_set_text(info_stats_label_, "Set frequency and TX power to use LoRa");
+    if (!region) {
+        lv_label_set_text(info_stats_label_, "Select your region in Settings");
         lv_obj_set_style_text_color(info_stats_label_, lv_color_hex(0xC9A45C), LV_PART_MAIN);
     } else if (initialization_pending_ || !lora_info_.hw_ready) {
         lv_label_set_text(info_stats_label_, lora_app_detail::safe_text(lora_info_.diag, "No diagnostics"));
@@ -645,7 +648,7 @@ void LoraScreen::create_help_view()
                "Editor\nEnter: send or save\nEsc: cancel\nFn + arrows: move cursor\nFn + N: end of text\n"
                "Ctrl + V: paste copied text\n\n"
                "Info\nView radio and link details. Up / Down: scroll. Enter: change nickname (10 bytes max). "
-               "S: set frequency and TX power.\n\n"
+               "S: select a radio region.\n\n"
                "Messages: 116 bytes max, or 107 bytes when replying.\n\n"
                "Sending or failed messages can be copied, but not replied to.\n\n"
                "Fn + H: open Help\nUp / Down: scroll Help",
@@ -733,9 +736,9 @@ void LoraScreen::create_info_view()
     if (!info_table_content_) return;
 
     constexpr std::array<const char *, INFO_ROW_COUNT> captions{
-        "Nickname",       "Signal (RSSI)", "SNR (dB)",        "Radio Chip",    "Frequency",    "Version",
-        "Modulation",     "Bandwidth",     "Spread Factor",   "Coding Rate",   "TX Power",     "Preamble",
-        "Sync Word",      "TCXO Voltage",  "Current Limit",   "Payload Limit", "SPI Device",   "PI4IO",
+        "Nickname", "Signal (RSSI)", "SNR (dB)", "Radio Chip", "Region", "Frequency", "TX Power", "Duty Cycle",
+        "Version", "Modulation", "Bandwidth", "Spread Factor", "Coding Rate", "Preamble", "Sync Word",
+        "TCXO Voltage", "Current Limit", "Payload Limit", "SPI Device", "PI4IO",
     };
     for (std::size_t index = 0; index < INFO_ROW_COUNT; ++index) {
         const lv_coord_t y = static_cast<lv_coord_t>(index) * lora_app_detail::kInfoRowHeight;
@@ -823,8 +826,9 @@ bool LoraScreen::ui_ready() const
     if (!info_radio_settings_ || !radio_notice_ || !radio_notice_skip_ || !radio_notice_ok_ || !radio_setup_ ||
         !radio_setup_status_ || !radio_setup_save_ || !radio_setup_close_ || !lv_obj_get_child(radio_setup_close_, 0))
         return false;
-    for (std::size_t i = 0; i < radio_rows_.size(); ++i)
-        if (!radio_rows_[i] || !radio_values_[i] || !radio_arrows_[i][0] || !radio_arrows_[i][1]) return false;
+    if (!radio_region_label_ || !radio_bandwidth_label_ || !radio_arrows_[0] || !radio_arrows_[1]) return false;
+    for (auto *value : radio_values_)
+        if (!value) return false;
     if (!lora_page_controls_ready(page_root_, messages_view_, message_list_, empty_message_label_,
                                   empty_message_hint_label_, info_view_, info_status_dot_, info_status_label_,
                                   info_change_name_button_, info_stats_label_, info_table_, info_table_content_,

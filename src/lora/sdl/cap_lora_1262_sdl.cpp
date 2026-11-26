@@ -6,6 +6,18 @@
 #include <cstdio>
 
 namespace cap_lora {
+namespace {
+
+LoraDutyCycle::Airtime simulated_airtime(std::size_t payload_size, int bandwidth_hz)
+{
+    // SF12, explicit header, CRC and low-data-rate optimization at both widths.
+    const auto coded_blocks = (8 * payload_size + 35) / 40;
+    const auto quarter_symbols = 4 * (PREAMBLE_SYMBOLS + 8 + coded_blocks * CODING_RATE) + 17;
+    const auto scale = 1000000LL * (1 << SPREADING_FACTOR);
+    return LoraDutyCycle::Airtime{(quarter_symbols * scale + 4 * bandwidth_hz - 1) / (4 * bandwidth_hz)};
+}
+
+}  // namespace
 
 CapLoRa1262::CapLoRa1262() = default;
 CapLoRa1262::~CapLoRa1262() { shutdown(); }
@@ -58,6 +70,11 @@ pw::Result<bool> CapLoRa1262::msg_send(const std::string& payload)
     if (payload.empty() || payload.size() > kMaxTextPayload) return pw::Status::InvalidArgument();
     if (!initialized_) return pw::Status::Unavailable();
     if (tx_in_progress_) return pw::Status::FailedPrecondition();
+    const auto& region = *radio_settings_.preset();
+    if (!duty_cycle_.reserve(LoraDutyCycle::Clock::now(), simulated_airtime(payload.size(), region.bandwidth_hz),
+                             region.duty_percent)) {
+        return pw::Status::ResourceExhausted();
+    }
     tx_mode_ = false;
     has_sent_message_ = true;
     last_tx_ = payload;
@@ -110,8 +127,10 @@ void CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     info->initialized = initialized_ ? 1 : 0;
     info->hw_ready = initialized_ ? 1 : 0;
     if (initialized_) {
-        info->frequency_mhz    = radio_settings_.frequency_mhz();
-        info->output_power_dbm = static_cast<int8_t>(radio_settings_.tx_power_dbm);
+        const auto& region = *radio_settings_.preset();
+        info->frequency_mhz    = region.frequency_mhz();
+        info->bandwidth_khz    = region.bandwidth_khz();
+        info->output_power_dbm = static_cast<int8_t>(region.tx_power_dbm());
     }
     info->tx_mode = tx_mode_ ? 1 : 0;
     info->tx_in_progress = tx_in_progress_ ? 1 : 0;

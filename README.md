@@ -69,19 +69,22 @@ CAP_LORA_SDL_ZOOM=2 ./dist/sdl/Cap-LoRa-1262
 ```
 
 Acknowledge the radio regulations notice on launch. Press `7` or Space to
-toggle **Don't show again**, then press Enter to continue. Frequency and
-transmit power have no defaults. Select both in Radio settings to enable the
-radio. If you skip setup, the app opens with the radio off and offers setup
-again on the next launch. Open Info and press `S` to change the settings.
+toggle **Don't show again**, then press Enter to continue. Select a radio
+region to enable LoRa. If you skip setup, the app opens with the radio off.
+Open Info and press `S` to return to the region picker. After upgrading from a
+version with individual frequency and power settings, select your region again.
 
-Use `F`/`X` or Up/Down to move between fields and `Z`/`C` or Left/Right to
-cycle through presets. Press Enter to save or Esc to skip or cancel.
-Frequency presets include the app's original 868 MHz and selected 125 kHz
-channel centers from the LoRa Alliance regional parameters within the Cap's
-868–923 MHz hardware range. Power presets are -9, 0, 5, 10, 11, 13, 14, 17,
-20, and 22 dBm of conducted output. Choose settings that comply with local
-rules for point-to-point operation, including bandwidth, airtime, and
-radiated power. [Cap specifications](https://docs.m5stack.com/en/cap/Cap_LoRa-1262) · [LoRa Alliance regional parameters](https://resources.lora-alliance.org/technical-specifications/rp002-1-0-5-lorawan-regional-parameters)
+Use `Z`/`C` or Left/Right to cycle through regions. The picker shows the
+frequency, conducted TX power, duty cycle, and bandwidth before you save.
+Press Enter to save or Esc to skip or cancel. Other Cap Chat devices must use
+the same region to communicate.
+
+The presets follow the region table and include bands that can fit a full
+channel in the Cap's 868–923 MHz hardware range. Each carrier is centered in
+the overlap and power is capped at the Cap's 22 dBm maximum. The app tracks
+transmit airtime over a rolling hour while it is running. Choose the region
+for your location and follow the applicable rules for point-to-point
+operation. [Meshtastic region table](https://meshtastic.org/docs/configuration/radio/lora/#region) · [Cap specifications](https://docs.m5stack.com/en/cap/Cap_LoRa-1262)
 
 Key controls:
 

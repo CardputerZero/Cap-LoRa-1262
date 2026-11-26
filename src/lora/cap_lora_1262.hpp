@@ -14,6 +14,7 @@
 #include <string>
 
 #include "lora/lora_radio_settings.hpp"
+#include "lora/lora_duty_cycle.hpp"
 #include "pw_result/result.h"
 #include "pw_status/status.h"
 
@@ -44,7 +45,6 @@ void shutdown();
 
 namespace cap_lora {
 inline constexpr std::size_t MAX_TEXT_PAYLOAD = 127;
-inline constexpr float BANDWIDTH_KHZ          = 125.0f;
 inline constexpr uint8_t SPREADING_FACTOR     = 12;
 inline constexpr uint8_t CODING_RATE          = 5;
 inline constexpr uint8_t SYNC_WORD            = 0x34;
@@ -71,7 +71,7 @@ struct LoraInfo {
     float rssi = 0.0f;
     float snr = 0.0f;
     float frequency_mhz = 0.0f;
-    float bandwidth_khz = BANDWIDTH_KHZ;
+    float bandwidth_khz = 0.0f;
     float tcxo_voltage = TCXO_VOLTAGE;
     float current_limit_ma = CURRENT_LIMIT_MA;
     uint64_t rx_count = 0;
@@ -156,6 +156,7 @@ private:
     std::shared_ptr<Module> MyModule_;
     std::shared_ptr<SX1262> sx1262_;
     RadioSettings radio_settings_;
+    LoraDutyCycle duty_cycle_;
     bool initialized_ = false;
     std::atomic<bool> stop_requested_{false};
     bool tx_in_progress_ = false;

@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cerrno>
-#include <charconv>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -51,15 +50,6 @@ bool valid_nickname(const std::string& nickname)
 std::filesystem::path nickname_path()
 {
     return user_config_location().directory / kNicknameFileName;
-}
-
-bool read_config_integer(std::ifstream& input, int& value)
-{
-    std::string line;
-    if (!std::getline(input, line) || line.empty()) return false;
-    const auto end    = line.data() + line.size();
-    const auto parsed = std::from_chars(line.data(), end, value);
-    return parsed.ec == std::errc{} && parsed.ptr == end;
 }
 
 UserConfigLocation radio_config_location()
@@ -195,24 +185,20 @@ RadioPreferences load_radio_preferences()
     RadioPreferences preferences;
     // Older files recorded Continue even without an explicit opt-out.
     preferences.skip_notice = line == "skip-notice";
-    int frequency_khz = 0;
-    int tx_power_dbm = 0;
-    if (read_config_integer(input, frequency_khz)) {
-        preferences.settings.frequency_khz = frequency_khz;
-    }
-    if (read_config_integer(input, tx_power_dbm)) {
-        preferences.settings.tx_power_dbm = tx_power_dbm;
+    // Legacy frequency/power pairs cannot establish a region or its duty limit.
+    if (std::getline(input, line) && line.compare(0, 7, "region=") == 0) {
+        preferences.settings = radio_settings_for_code(std::string_view(line).substr(7));
     }
     return preferences;
 }
 
 bool save_radio_preferences(const RadioPreferences& preferences, std::string& error)
 {
-    const auto &settings = preferences.settings;
     std::string contents = preferences.skip_notice ? "skip-notice\n" : "show-notice\n";
-    if (settings.valid_frequency() || settings.valid_power()) {
-        contents += std::to_string(settings.valid_frequency() ? settings.frequency_khz : 0) + '\n';
-        contents += std::to_string(settings.valid_power() ? settings.tx_power_dbm : kUnsetTxPowerDbm) + '\n';
+    if (const auto* region = preferences.settings.preset()) {
+        contents += "region=";
+        contents += region->code;
+        contents += '\n';
     }
     return save_config(radio_config_location(), kRadioFileName, contents, error);
 }

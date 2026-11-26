@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(M5CardputerZeroCapLoRa1262 VERSION 1.0.2 LANGUAGES C CXX ASM)
+project(M5CardputerZeroCapLoRa1262 VERSION 1.0.3 LANGUAGES C CXX ASM)
 
 option(CAP_LORA_USE_SDL "Use LVGL's SDL backend for desktop development" ON)
 option(BUILD_TESTING "Build Cap-LoRa-1262 tests" OFF)
@@ -399,6 +399,13 @@ if(BUILD_TESTING)
         target_compile_options(cap_lora_ui_contract_tests PRIVATE -Wall -Wextra -Wpedantic)
     endif()
     add_test(NAME cap_lora_ui_contract COMMAND cap_lora_ui_contract_tests)
+
+    add_executable(cap_lora_radio_settings_tests tests/lora_radio_settings_test.cpp)
+    target_include_directories(cap_lora_radio_settings_tests PRIVATE "${CAP_LORA_SRC_DIR}")
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(cap_lora_radio_settings_tests PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    add_test(NAME cap_lora_radio_settings COMMAND cap_lora_radio_settings_tests)
 
     if(CAP_LORA_USE_SDL)
         add_executable(cap_lora_1262_sdl_tests

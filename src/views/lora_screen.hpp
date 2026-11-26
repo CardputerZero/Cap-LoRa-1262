@@ -71,13 +71,15 @@ private:
         Rssi,
         Snr,
         Radio,
+        Region,
         Frequency,
+        Power,
+        DutyCycle,
         Version,
         Modulation,
         Bandwidth,
         SpreadingFactor,
         CodingRate,
-        Power,
         Preamble,
         SyncWord,
         TcxoVoltage,
@@ -99,7 +101,6 @@ private:
     cap_lora::RadioPreferences radio_preferences_;
     bool radio_notice_acknowledged_ = false;
     RadioDialog radio_dialog_ = RadioDialog::None;
-    std::size_t radio_field_ = 0;
     cap_lora::RadioSettings radio_draft_;
     std::shared_ptr<lora_app_detail::LoraInitializationState> initialization_state_;
     std::thread init_thread_;
@@ -149,9 +150,10 @@ private:
     lv_obj_t *radio_setup_status_  = nullptr;
     lv_obj_t *radio_setup_save_    = nullptr;
     lv_obj_t *radio_setup_close_   = nullptr;
-    std::array<lv_obj_t *, 2> radio_rows_{};
-    std::array<lv_obj_t *, 2> radio_values_{};
-    std::array<std::array<lv_obj_t *, 2>, 2> radio_arrows_{};
+    lv_obj_t *radio_region_label_ = nullptr;
+    lv_obj_t *radio_bandwidth_label_ = nullptr;
+    std::array<lv_obj_t *, 3> radio_values_{};
+    std::array<lv_obj_t *, 2> radio_arrows_{};
 
     static void set_visible(lv_obj_t *object, bool visible);
 
@@ -175,8 +177,8 @@ private:
     void create_send_view();
     void create_radio_dialogs();
     void show_radio_setup(bool initial);
-    void update_radio_fields(const char *status = nullptr);
-    void step_radio_field(std::size_t field, bool forward);
+    void update_radio_region(const char *status = nullptr);
+    void step_radio_region(bool forward);
     bool handle_radio_dialog_key(uint32_t key);
     void accept_radio_notice();
     void save_radio_settings();

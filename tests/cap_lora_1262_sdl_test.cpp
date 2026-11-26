@@ -8,20 +8,16 @@ int main()
 {
     cap_lora::CapLoRa1262 radio;
     cap_lora::LoraInfo info{};
-    const cap_lora::RadioSettings settings{915200, 0};
+    const auto settings = cap_lora::radio_settings_for_code("US");
     CHECK(!radio.exec_send("before init"));
     CHECK(!radio.initialize({}));
-    CHECK(!radio.initialize({settings.frequency_khz}));
-    CHECK(!radio.initialize({0, settings.tx_power_dbm}));
-    CHECK(!radio.initialize({923001, 22}));
-    CHECK(!radio.initialize({868000, 23}));
-    CHECK(!radio.initialize({915250, 0}));
-    CHECK(!radio.initialize({915200, 12}));
+    CHECK(!radio.initialize({cap_lora::kRadioRegions.size() + 1}));
+    CHECK(!radio.initialize(cap_lora::radio_settings_for_code("CN")));
     CHECK(!radio.exec_send("incomplete configuration"));
     CHECK(radio.initialize(settings));
     radio.get_info(&info, false);
     CHECK(info.initialized && info.hw_ready);
-    CHECK(info.frequency_mhz == settings.frequency_mhz() && info.output_power_dbm == 0);
+    CHECK(info.frequency_mhz == 912.5f && info.output_power_dbm == 22 && info.bandwidth_khz == 125.0f);
     CHECK(std::strcmp(info.spi_device, "sdl://lora") == 0);
     CHECK(std::strcmp(info.probe_display, "LoRa: SDL simulation") == 0);
 
@@ -49,19 +45,26 @@ int main()
     radio.request_stop();
     CHECK(!radio.initialize(settings));
     radio.clear_stop();
-    CHECK(radio.initialize({868100, -9}));
-    CHECK(radio.initialize({922500, 14}));
+    const auto eu = cap_lora::radio_settings_for_code("EU_868");
+    const auto narrow = cap_lora::radio_settings_for_code("EU_N_868");
+    CHECK(radio.initialize(eu));
+    CHECK(radio.initialize(narrow));
     radio.get_info(&info, false);
-    CHECK(info.frequency_mhz == 922.5f && info.output_power_dbm == 14);
-    radio.shutdown();
+    CHECK(info.frequency_mhz == 869.525f && info.output_power_dbm == 22 && info.bandwidth_khz == 62.5f);
+    std::size_t frames = 0;
+    while (frames < 100 && radio.msg_send(maximum).ok()) ++frames;
+    CHECK(frames > 0 && frames < 100);
+    CHECK(radio.msg_send(maximum).status().IsResourceExhausted());
+    CHECK(radio.initialize(narrow));
+    CHECK(radio.msg_send(maximum).status().IsResourceExhausted());
+    CHECK(radio.initialize(eu));
+    CHECK(radio.msg_send(maximum).ok());
+    CHECK(radio.msg_send(maximum).status().IsResourceExhausted());
 
-    const auto &frequencies = cap_lora::kRadioFrequenciesKhz;
-    const auto &powers = cap_lora::kRadioPowersDbm;
-    CHECK(cap_lora::step_radio_preset(frequencies, 0, true) == frequencies.front());
-    CHECK(cap_lora::step_radio_preset(frequencies, 0, false) == frequencies.back());
-    CHECK(cap_lora::step_radio_preset(frequencies, frequencies.back(), true) == frequencies.front());
-    CHECK(cap_lora::step_radio_preset(frequencies, frequencies.front(), false) == frequencies.back());
-    CHECK(cap_lora::step_radio_preset(powers, -9, true) == 0);
-    CHECK(cap_lora::step_radio_preset(powers, 0, false) == -9);
+    CHECK(radio.initialize(cap_lora::radio_settings_for_code("JP")));
+    radio.get_info(&info, false);
+    CHECK(info.frequency_mhz == 921.75f && info.output_power_dbm == 13);
+    CHECK(radio.exec_send("unlimited region"));
+    radio.shutdown();
     return 0;
 }

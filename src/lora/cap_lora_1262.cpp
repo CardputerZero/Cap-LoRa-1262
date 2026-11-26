@@ -289,7 +289,8 @@ bool cap_lora::CapLoRa1262::service_radio()
 
 bool cap_lora::CapLoRa1262::initialize(RadioSettings settings)
 {
-    if (!settings.complete() || tx_in_progress_ || stop_requested_.load(std::memory_order_acquire)) return false;
+    const auto* region = settings.preset();
+    if (!region || tx_in_progress_ || stop_requested_.load(std::memory_order_acquire)) return false;
     if (initialized_) {
         shutdown();
         if (stop_requested_.load(std::memory_order_acquire)) return false;
@@ -299,8 +300,8 @@ bool cap_lora::CapLoRa1262::initialize(RadioSettings settings)
         shutdown();
         return false;
     }
-    if (sx1262_->begin(settings.frequency_mhz(), BANDWIDTH_KHZ, SPREADING_FACTOR, CODING_RATE, SYNC_WORD,
-                       static_cast<int8_t>(settings.tx_power_dbm), PREAMBLE_SYMBOLS, TCXO_VOLTAGE,
+    if (sx1262_->begin(region->frequency_mhz(), region->bandwidth_khz(), SPREADING_FACTOR, CODING_RATE, SYNC_WORD,
+                       static_cast<int8_t>(region->tx_power_dbm()), PREAMBLE_SYMBOLS, TCXO_VOLTAGE,
                        false) != RADIOLIB_ERR_NONE) {
         shutdown();
         return false;
@@ -364,6 +365,12 @@ pw::Result<bool> cap_lora::CapLoRa1262::msg_send(const std::string& payload)
     if (payload.empty() || payload.size() > kMaxTextPayload) return pw::Status::InvalidArgument();
     if (!initialized_) return pw::Status::Unavailable();
     if (!sx1262_ || tx_in_progress_) return pw::Status::FailedPrecondition();
+    const auto duty_percent = radio_settings_.preset()->duty_percent;
+    if (duty_percent < 100 &&
+        !duty_cycle_.reserve(LoraDutyCycle::Clock::now(), LoraDutyCycle::Airtime{sx1262_->getTimeOnAir(payload.size())},
+                             duty_percent)) {
+        return pw::Status::ResourceExhausted();
+    }
     if (sx1262_->standby() != RADIOLIB_ERR_NONE) return pw::Status::Internal();
     received_flag_.store(false, std::memory_order_release);
     transmitted_flag_.store(false, std::memory_order_release);
@@ -441,8 +448,10 @@ void cap_lora::CapLoRa1262::get_info(LoraInfo* info, bool drain_events) const
     info->initialized = initialized_ ? 1 : 0;
     info->hw_ready = initialized_ ? 1 : 0;
     if (initialized_) {
-        info->frequency_mhz    = radio_settings_.frequency_mhz();
-        info->output_power_dbm = static_cast<int8_t>(radio_settings_.tx_power_dbm);
+        const auto& region = *radio_settings_.preset();
+        info->frequency_mhz    = region.frequency_mhz();
+        info->bandwidth_khz    = region.bandwidth_khz();
+        info->output_power_dbm = static_cast<int8_t>(region.tx_power_dbm());
     }
     info->tx_mode = tx_mode_ ? 1 : 0;
     info->tx_in_progress = tx_in_progress_ ? 1 : 0;
